@@ -1,0 +1,153 @@
+:root {
+  /* Modern Palette - Light Mode (Neutral & Deep Red) */
+  --bg-primary: #f5f5f5;
+  /* Neutral 100 */
+  --bg-secondary: #ffffff;
+  /* White */
+  --bg-sidebar: #171717;
+  /* Neutral 900 */
+
+  --text-primary: #171717;
+  /* Neutral 900 */
+  --text-secondary: #525252;
+  /* Neutral 600 */
+  --text-sidebar: #e5e5e5;
+  /* Neutral 200 */
+  --text-sidebar-muted: #a3a3a3;
+  /* Neutral 400 */
+
+  /* Primary Brand Color: Deep Crimson */
+  --accent-primary: #b91c1c;
+  /* Red 700 */
+  --accent-hover: #991b1b;
+  /* Red 800 */
+  --accent-subtle: #fef2f2;
+  /* Red 50 */
+
+  /* Functional Colors */
+  --accent-success: #059669;
+  /* Emerald 600 */
+  --accent-success-bg: #d1fae5;
+  /* Emerald 100 */
+
+  --accent-warning: #d97706;
+  /* Amber 600 */
+  --accent-warning-bg: #fef3c7;
+  /* Amber 100 */
+
+  --accent-danger: #b91c1c;
+  /* Red 700 */
+  --accent-danger-bg: #fee2e2;
+  /* Red 100 */
+
+  /* Modern Spacing & Radius */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+
+  /* Smooth Shadows */
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme='dark'] {
+  --bg-primary: #0a0a0a;
+  /* Neutral 950 */
+  --bg-secondary: #262626;
+  /* Neutral 800 */
+  --bg-sidebar: #0a0a0a;
+  /* Neutral 950 */
+
+  --text-primary: #fafafa;
+  /* Neutral 50 */
+  --text-secondary: #a3a3a3;
+  /* Neutral 400 */
+  --text-sidebar: #fafafa;
+  --text-sidebar-muted: #737373;
+
+  /* Primary Brand Color: Deep Red (Dark Mode) */
+  --accent-primary: #dc2626;
+  /* Red 600 */
+  --accent-hover: #ef4444;
+  /* Red 500 */
+  --accent-subtle: #450a0a;
+  /* Red 950 */
+
+  --accent-success: #34d399;
+  /* Emerald 400 */
+  --accent-success-bg: #064e3b;
+  /* Emerald 900 */
+
+  --accent-warning: #fbbf24;
+  /* Amber 400 */
+  --accent-warning-bg: #451a03;
+  /* Amber 900 */
+
+  --accent-danger: #f87171;
+  /* Red 400 */
+  --accent-danger-bg: #450a0a;
+  /* Red 900 */
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-primary);
+}
+
+.date-input-white-icon::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
