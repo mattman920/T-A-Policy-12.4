@@ -99,7 +99,7 @@ const Scorecard = () => {
                     <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
                         <thead>
                             <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'rgba(0,0,0,0.02)' }}>
-                                <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', width: '60px' }}>Rank</th>
+                                <th style={{ padding: '1rem', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)', width: '60px' }}>Rank</th>
                                 <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)' }}>Employee</th>
                                 <th style={{ padding: '1rem', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)' }}>Score</th>
                                 <th style={{ padding: '1rem', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)' }}>Tier</th>
@@ -116,7 +116,7 @@ const Scorecard = () => {
                                     borderBottom: '1px solid var(--border-color)',
                                     transition: 'background-color 0.2s'
                                 }}>
-                                    <td style={{ padding: '1rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                                    <td style={{ padding: '1rem', color: 'var(--text-secondary)', fontWeight: 500, textAlign: 'center' }}>
                                         {index + 1}
                                     </td>
                                     <td style={{ padding: '1rem', fontWeight: 500 }}>

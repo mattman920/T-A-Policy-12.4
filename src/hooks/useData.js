@@ -182,7 +182,22 @@ export function useData() {
     };
 
     const updateSettings = async (newSettings) => {
-        const newData = { ...data, settings: { ...data.settings, ...newSettings } };
+        let updatedEmployees = data.employees;
+
+        // Check if starting points changed, requiring a recalculation
+        if (newSettings.startingPoints !== data.settings.startingPoints) {
+            updatedEmployees = data.employees.map(employee => {
+                const allViolationsForEmployee = data.violations.filter(v => v.employeeId === employee.id);
+                const currentPoints = calculateCurrentPoints(
+                    newSettings.startingPoints,
+                    allViolationsForEmployee,
+                    newSettings.violationPenalties || data.settings.violationPenalties
+                );
+                return { ...employee, currentPoints };
+            });
+        }
+
+        const newData = { ...data, employees: updatedEmployees, settings: { ...data.settings, ...newSettings } };
         await saveData(newData);
     };
 
