@@ -78,7 +78,12 @@ const Employees = () => {
 
     const toggleArchive = async (employee) => {
         if (confirm(`Are you sure you want to ${employee.archived ? 'unarchive' : 'archive'} ${employee.name}?`)) {
-            await updateEmployee({ ...employee, archived: !employee.archived });
+            const updatedEmployee = {
+                ...employee,
+                archived: !employee.archived,
+                archivedDate: !employee.archived ? new Date().toISOString() : null
+            };
+            await updateEmployee(updatedEmployee);
         }
     };
 

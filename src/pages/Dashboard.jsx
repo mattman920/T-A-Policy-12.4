@@ -4,6 +4,9 @@ import { Users, CheckCircle, AlertTriangle, TrendingDown } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';
 import { useNavigate } from 'react-router-dom';
+
+import TierBreakdown from '../components/TierBreakdown';
+import TerminationsReportModal from '../components/TerminationsReportModal';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell
@@ -14,22 +17,29 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [filterEmployee, setFilterEmployee] = useState('all');
   const [filterType, setFilterType] = useState('all');
+  const [isTerminationsModalOpen, setIsTerminationsModalOpen] = useState(false);
 
   // Safe data access
   const employees = data?.employees || [];
   const violations = data?.violations || [];
 
   // --- Metrics Calculation ---
-  const { totalEmployees, severeCount, finalCount, goodStandingCount, coachingCount } = useMemo(() => {
+  const { totalEmployees, severeCount, finalCount, goodStandingCount, coachingCount, terminationCount } = useMemo(() => {
     let severe = 0;
     let final = 0;
     let good = 0;
     let coaching = 0;
+    let terminations = 0;
 
     // Get issued DAs from data context
     const issuedDAs = data?.issuedDAs || [];
 
     employees.forEach(emp => {
+      if (emp.archived) {
+        terminations++;
+        return;
+      }
+
       const empViolations = violations.filter(v => v.employeeId === emp.id);
       const points = calculateCurrentPoints(STARTING_POINTS, empViolations);
       const tier = determineTier(points);
@@ -54,7 +64,8 @@ const Dashboard = () => {
       severeCount: severe,
       finalCount: final,
       goodStandingCount: good,
-      coachingCount: coaching
+      coachingCount: coaching,
+      terminationCount: terminations
     };
   }, [employees, violations, data?.issuedDAs]);
 
@@ -122,10 +133,45 @@ const Dashboard = () => {
 
       {/* Stats Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-        <StatCard title="Total Employees" value={totalEmployees} icon={Users} color="var(--accent-primary)" />
-        <StatCard title="Good Standing" value={goodStandingCount} icon={CheckCircle} color="var(--accent-success)" />
-        <StatCard title="Action Required" value={coachingCount + severeCount + finalCount} icon={AlertTriangle} color="var(--accent-warning)" />
-        <StatCard title="Terminations" value={0} icon={TrendingDown} color="var(--accent-danger)" />
+        <StatCard
+          title="Total Employees"
+          value={totalEmployees}
+          icon={Users}
+          color="var(--accent-primary)"
+          onClick={() => navigate('/employees')}
+        />
+        <StatCard
+          title="Good Standing"
+          value={goodStandingCount}
+          icon={CheckCircle}
+          color="var(--accent-success)"
+          onClick={() => navigate('/da-issuance')}
+        />
+        <StatCard
+          title="Action Required"
+          value={coachingCount + severeCount + finalCount}
+          icon={AlertTriangle}
+          color="var(--accent-warning)"
+          onClick={() => navigate('/da-issuance')}
+        />
+        <StatCard
+          title="Terminations"
+          value={terminationCount}
+          icon={TrendingDown}
+          color="var(--accent-danger)"
+          onClick={() => setIsTerminationsModalOpen(true)}
+        />
+      </div>
+
+      <TerminationsReportModal
+        isOpen={isTerminationsModalOpen}
+        onClose={() => setIsTerminationsModalOpen(false)}
+        employees={employees}
+      />
+
+      {/* Tier Breakdown */}
+      <div style={{ marginBottom: '2rem' }}>
+        <TierBreakdown employees={employees} violations={violations} />
       </div>
 
       {/* Charts Row */}

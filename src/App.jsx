@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Layout from './components/Layout';
@@ -12,8 +12,25 @@ import LogViolation from './pages/LogViolation';
 import Scorecard from './pages/Scorecard';
 import GeneralConfiguration from './pages/GeneralConfiguration';
 import ViolationPenalties from './pages/ViolationPenalties';
+import PinProtection from './components/PinProtection';
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return false;
+
+    const tokenDate = new Date(token);
+    const now = new Date();
+    const diffTime = Math.abs(now - tokenDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    return diffDays <= 45;
+  });
+
+  if (!isAuthenticated) {
+    return <PinProtection onAuthenticated={() => setIsAuthenticated(true)} />;
+  }
+
   return (
     <ThemeProvider>
       <HashRouter>
