@@ -33,7 +33,7 @@ const Login = ({ onLoginSuccess }) => {
     };
 
     return (
-        <div style={{
+        <div data-theme="dark" style={{
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',

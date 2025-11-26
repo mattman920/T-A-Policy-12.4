@@ -5,3 +5,9 @@ Bug #2 = On the scorecard page, where it says rank and lists all the numbers lik
 Bug #3 = When the application is opended on the web, in the actual tab in the browser at the top, it displays the vite+react logo next to the words time-and-attendance-tracker. Instead I wanted it the vite+react logo to be replaced with something more aesteically pleaseing and then for the tite of the tab in the browser, can we make it just say T&ATracker
 
 Bug #4 = I found another bug in the application. The starting points balance, when the number is updated in the general configuration page in the settings tab and is updated to like 100 for example, when it should change the logic of the applicationn to change everyones starting points to the new updated number and calcuate the scores accordingly. Can you make this functionality is in the application. 
+
+
+
+Please update the login credential page when landing on the page to dark mode so it easier to see. Right now the page looks good just the white is blinding.
+
+On the scorecard page I want there to be a qaurter selector so we can use the selector to select the specfic quarter we want to see and it will display the scorecard for that quarter. It should default to the current quarter.

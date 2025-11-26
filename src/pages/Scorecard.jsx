@@ -6,31 +6,78 @@ import { Trophy, AlertCircle, Calendar } from 'lucide-react';
 const Scorecard = () => {
     const { data, loading } = useData();
 
+    // State for selected quarter
+    const [selectedQuarter, setSelectedQuarter] = React.useState(() => {
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+        const q = Math.floor(currentMonth / 3) + 1;
+        return `${currentYear}-Q${q}`;
+    });
+
+    // Generate available quarters (current year and previous year)
+    const availableQuarters = useMemo(() => {
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+        const currentQ = Math.floor(currentMonth / 3) + 1;
+
+        const quarters = [];
+
+        // Add quarters for current year up to current quarter
+        for (let q = currentQ; q >= 1; q--) {
+            quarters.push({
+                id: `${currentYear}-Q${q}`,
+                label: `Q${q} ${currentYear}`,
+                year: currentYear,
+                quarter: q
+            });
+        }
+
+        // Add all quarters for previous year
+        const prevYear = currentYear - 1;
+        for (let q = 4; q >= 1; q--) {
+            quarters.push({
+                id: `${prevYear}-Q${q}`,
+                label: `Q${q} ${prevYear}`,
+                year: prevYear,
+                quarter: q
+            });
+        }
+
+        return quarters;
+    }, []);
+
     const scorecardData = useMemo(() => {
         if (!data.employees) return [];
 
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth(); // 0-11
-        const currentQuarter = Math.floor(currentMonth / 3) + 1;
+        // Parse selected quarter
+        const [yearStr, qStr] = selectedQuarter.split('-');
+        const year = parseInt(yearStr);
+        const quarter = parseInt(qStr.replace('Q', ''));
 
-        const quarterStart = new Date(currentYear, (currentQuarter - 1) * 3, 1);
-        const quarterEnd = new Date(currentYear, currentQuarter * 3, 0, 23, 59, 59);
+        const quarterStart = new Date(year, (quarter - 1) * 3, 1);
+        const quarterEnd = new Date(year, quarter * 3, 0, 23, 59, 59);
 
         return data.employees
             .filter(emp => !emp.archived)
             .map(employee => {
                 const empViolations = data.violations.filter(v => v.employeeId === employee.id);
 
-                // Current Standing (All time / based on current logic)
-                const currentPoints = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
-                const tier = determineTier(currentPoints);
-
                 // Quarter specific stats
                 const quarterViolations = empViolations.filter(v => {
                     const vDate = new Date(v.date);
+                    // Adjust for timezone if needed, but assuming local date comparison for simplicity based on existing code
+                    // The existing code used local time for quarterStart/End, so we stick to that.
+                    // However, pointCalculator uses UTC for some things. 
+                    // Let's stick to the existing logic in Scorecard.jsx which used:
+                    // const vDate = new Date(v.date);
                     return vDate >= quarterStart && vDate <= quarterEnd;
                 });
+
+                // Current Standing (Based on selected quarter)
+                const currentPoints = calculateCurrentPoints(data.settings.startingPoints, quarterViolations, data.settings.violationPenalties);
+                const tier = determineTier(currentPoints);
 
                 const counts = {
                     [VIOLATION_TYPES.TARDY_1_5]: 0,
@@ -54,14 +101,13 @@ const Scorecard = () => {
                 };
             })
             .sort((a, b) => b.currentPoints - a.currentPoints);
-    }, [data]);
+    }, [data, selectedQuarter]);
 
     if (loading) return <div>Loading...</div>;
 
     const getQuarterLabel = () => {
-        const now = new Date();
-        const q = Math.floor(now.getMonth() / 3) + 1;
-        return `Q${q} ${now.getFullYear()}`;
+        const q = availableQuarters.find(q => q.id === selectedQuarter);
+        return q ? q.label : selectedQuarter;
     };
 
     return (
@@ -69,10 +115,30 @@ const Scorecard = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <div>
                     <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Scorecard</h1>
-                    <p style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Calendar size={16} />
-                        Performance Summary for {getQuarterLabel()}
-                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <p style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                            <Calendar size={16} />
+                            Performance Summary for
+                        </p>
+                        <select
+                            value={selectedQuarter}
+                            onChange={(e) => setSelectedQuarter(e.target.value)}
+                            style={{
+                                padding: '0.25rem 0.5rem',
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--border-color)',
+                                backgroundColor: 'var(--bg-secondary)',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.9rem',
+                                cursor: 'pointer',
+                                outline: 'none'
+                            }}
+                        >
+                            {availableQuarters.map(q => (
+                                <option key={q.id} value={q.id}>{q.label}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 <div style={{
                     backgroundColor: 'var(--bg-secondary)',
