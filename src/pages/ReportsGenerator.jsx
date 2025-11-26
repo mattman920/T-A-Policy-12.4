@@ -144,7 +144,7 @@ const ReportsGenerator = () => {
                 const issuedDAs = data?.issuedDAs || [];
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
-                    const points = calculateCurrentPoints(STARTING_POINTS, empViolations, penalties);
+                    const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, penalties);
                     const tier = determineTier(points);
 
                     if (tier.name !== 'Good Standing') {
@@ -170,7 +170,7 @@ const ReportsGenerator = () => {
             case 7: // Near-Threshold Warning
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
-                    const points = calculateCurrentPoints(STARTING_POINTS, empViolations, penalties);
+                    const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, penalties);
                     const tier = determineTier(points);
                     // "Within 17 points of the next tier" - implies dropping to a lower tier
                     // Check distance to current tier's floor
@@ -207,12 +207,12 @@ const ReportsGenerator = () => {
 
                 return employees.map(e => {
                     const quarterViolations = violations.filter(v => v.employeeId === e.id && quarterMonths.includes(new Date(v.date).getMonth()));
-                    const quarterPoints = calculateCurrentPoints(STARTING_POINTS, quarterViolations, penalties);
+                    const quarterPoints = calculateCurrentPoints(data.settings.startingPoints, quarterViolations, penalties);
 
                     const prevQ = selectedQuarter === 'Q1' ? 'Q4' : `Q${parseInt(selectedQuarter[1]) - 1}`;
                     const prevMonths = qMap[prevQ] || [];
                     const prevViolations = violations.filter(v => v.employeeId === e.id && prevMonths.includes(new Date(v.date).getMonth()));
-                    const prevPoints = calculateCurrentPoints(STARTING_POINTS, prevViolations, penalties);
+                    const prevPoints = calculateCurrentPoints(data.settings.startingPoints, prevViolations, penalties);
 
                     return {
                         'Employee': e.name,
@@ -255,7 +255,7 @@ const ReportsGenerator = () => {
 
                 return employees.map(emp => {
                     const quarterViolations = violations.filter(v => v.employeeId === emp.id && quarterMonths.includes(new Date(v.date).getMonth()));
-                    const points = calculateCurrentPoints(STARTING_POINTS, quarterViolations, penalties);
+                    const points = calculateCurrentPoints(data.settings.startingPoints, quarterViolations, penalties);
                     return { 'Employee': emp.name, 'Quarter': selectedQuarter, 'Status': determineTier(points).name };
                 });
             }
@@ -322,7 +322,7 @@ const ReportsGenerator = () => {
             case 19: { // DA Distribution
                 const distribution = { 'Good Standing': 0, 'Coaching': 0, 'Severe': 0, 'Final': 0, 'Termination': 0 };
                 employees.forEach(emp => {
-                    const points = calculateCurrentPoints(STARTING_POINTS, violations.filter(v => v.employeeId === emp.id), penalties);
+                    const points = calculateCurrentPoints(data.settings.startingPoints, violations.filter(v => v.employeeId === emp.id), penalties);
                     const tier = determineTier(points);
                     if (distribution[tier.name] !== undefined) distribution[tier.name]++;
                 });

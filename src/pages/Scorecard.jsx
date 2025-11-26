@@ -23,7 +23,7 @@ const Scorecard = () => {
                 const empViolations = data.violations.filter(v => v.employeeId === employee.id);
 
                 // Current Standing (All time / based on current logic)
-                const currentPoints = calculateCurrentPoints(STARTING_POINTS, empViolations, data.settings.violationPenalties);
+                const currentPoints = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
                 const tier = determineTier(currentPoints);
 
                 // Quarter specific stats

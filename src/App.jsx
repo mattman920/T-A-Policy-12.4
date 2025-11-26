@@ -12,23 +12,34 @@ import LogViolation from './pages/LogViolation';
 import Scorecard from './pages/Scorecard';
 import GeneralConfiguration from './pages/GeneralConfiguration';
 import ViolationPenalties from './pages/ViolationPenalties';
-import PinProtection from './components/PinProtection';
+import Login from './components/Login';
+import { supabase } from './utils/supabaseClient';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const token = localStorage.getItem('auth_token');
-    if (!token) return false;
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-    const tokenDate = new Date(token);
-    const now = new Date();
-    const diffTime = Math.abs(now - tokenDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
 
-    return diffDays <= 45;
-  });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
 
-  if (!isAuthenticated) {
-    return <PinProtection onAuthenticated={() => setIsAuthenticated(true)} />;
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (loading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>Loading...</div>;
+  }
+
+  if (!session) {
+    return <Login onLoginSuccess={setSession} />;
   }
 
   return (

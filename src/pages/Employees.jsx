@@ -199,7 +199,7 @@ const Employees = () => {
             }}>
                 {filteredEmployees.map(employee => {
                     const empViolations = data.violations.filter(v => v.employeeId === employee.id);
-                    const points = calculateCurrentPoints(STARTING_POINTS, empViolations, data.settings.violationPenalties);
+                    const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
                     const tier = determineTier(points);
 
                     return (

@@ -1,7 +1,7 @@
 
 // Constants
-export const STARTING_POINTS = 150;
 export const MAX_POINTS = 150;
+export const STARTING_POINTS = 25;
 
 export const TIERS = {
     GOOD: { name: 'Good Standing', min: 125, nextStart: 150, maxBonus: 150 }, // maxBonus is effectively cap

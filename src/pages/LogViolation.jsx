@@ -43,7 +43,7 @@ const LogViolation = () => {
     const getCurrentPoints = () => {
         if (!selectedEmployeeId) return 0;
         const empViolations = violations.filter(v => v.employeeId === selectedEmployeeId);
-        return calculateCurrentPoints(STARTING_POINTS, empViolations, data.settings.violationPenalties);
+        return calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
     };
 
     const handleSubmit = async (e) => {

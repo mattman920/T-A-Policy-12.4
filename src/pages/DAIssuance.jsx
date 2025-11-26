@@ -20,7 +20,7 @@ const DAIssuance = () => {
     // Identify pending DAs
     const pendingDAs = employees.map(emp => {
         const empViolations = violations.filter(v => v.employeeId === emp.id);
-        const points = calculateCurrentPoints(STARTING_POINTS, empViolations);
+        const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
         const tier = determineTier(points);
 
         // Check if this specific DA instance (Employee + Tier) has been issued

@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, TrendingUp, Moon, Sun, Settings, AlertCircle, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, TrendingUp, Moon, Sun, Settings, AlertCircle, ClipboardList, LogOut } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useData } from '../hooks/useData';
 
@@ -99,6 +99,32 @@ const Sidebar = () => {
                 >
                     {isDark ? <Sun size={20} /> : <Moon size={20} />}
                     <span style={{ fontWeight: 500 }}>{isDark ? 'Light Mode' : 'Dark Mode'}</span>
+                </button>
+
+                <button
+                    onClick={() => import('../utils/supabaseClient').then(({ supabase }) => supabase.auth.signOut())}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        padding: '0.875rem 1rem',
+                        width: '100%',
+                        borderRadius: 'var(--radius-md)',
+                        color: 'var(--accent-danger)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        transition: 'all 0.2s',
+                        cursor: 'pointer',
+                        border: '1px solid rgba(239, 68, 68, 0.2)'
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.2)';
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+                    }}
+                >
+                    <LogOut size={20} />
+                    <span style={{ fontWeight: 500 }}>Sign Out</span>
                 </button>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-sidebar-muted)', textAlign: 'center', opacity: 0.6 }}>
                     v1.1.0 • Build 2023

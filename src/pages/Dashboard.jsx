@@ -41,7 +41,7 @@ const Dashboard = () => {
       }
 
       const empViolations = violations.filter(v => v.employeeId === emp.id);
-      const points = calculateCurrentPoints(STARTING_POINTS, empViolations);
+      const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
       const tier = determineTier(points);
 
       // Check if DA is already issued
@@ -92,7 +92,7 @@ const Dashboard = () => {
   const problemEmployees = useMemo(() => {
     return employees.map(emp => {
       const empViolations = violations.filter(v => v.employeeId === emp.id);
-      const points = calculateCurrentPoints(STARTING_POINTS, empViolations);
+      const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
       return {
         ...emp,
         points,
@@ -171,7 +171,7 @@ const Dashboard = () => {
 
       {/* Tier Breakdown */}
       <div style={{ marginBottom: '2rem' }}>
-        <TierBreakdown employees={employees} violations={violations} />
+        <TierBreakdown employees={employees} violations={violations} startingPoints={data.settings.startingPoints} />
       </div>
 
       {/* Charts Row */}
