@@ -36,6 +36,53 @@ export const DEFAULT_POSITIVE_ADJUSTMENTS = {
 };
 
 /**
+ * Groups consecutive callouts into single instances.
+ * @param {Array} violations 
+ * @returns {Array} List of violations with consecutive callouts grouped
+ */
+export function groupConsecutiveCallouts(violations) {
+    // 1. Separate callouts and other violations
+    const callouts = violations.filter(v => v.type === VIOLATION_TYPES.CALLOUT);
+    const others = violations.filter(v => v.type !== VIOLATION_TYPES.CALLOUT);
+
+    if (callouts.length === 0) return others;
+
+    // 2. Sort callouts by date
+    callouts.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // 3. Group consecutive callouts
+    const groupedCallouts = [];
+    let currentGroup = [callouts[0]];
+
+    for (let i = 1; i < callouts.length; i++) {
+        const prev = currentGroup[currentGroup.length - 1];
+        const curr = callouts[i];
+
+        const prevDate = new Date(prev.date);
+        const currDate = new Date(curr.date);
+
+        // Check if consecutive (difference is 1 day)
+        // We use UTC to avoid timezone issues, assuming dates are YYYY-MM-DD
+        const diffTime = Math.abs(currDate - prevDate);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 1) {
+            currentGroup.push(curr);
+        } else {
+            // End of group, push only the first one as the "counter"
+            // But we might want to keep track of the fact it was a group?
+            // For now, just keeping the first one effectively treats it as one instance.
+            groupedCallouts.push(currentGroup[0]);
+            currentGroup = [curr];
+        }
+    }
+    // Push last group
+    groupedCallouts.push(currentGroup[0]);
+
+    return [...others, ...groupedCallouts];
+}
+
+/**
  * Calculates the total points deducted for a list of violations in a quarter.
  * @param {Array} violations - List of violation objects { type, date }
  * @param {Object} penalties - Optional custom penalties configuration
@@ -47,10 +94,13 @@ export function calculateDeductions(violations, penalties = {}) {
     const tardyPenalties = penalties.tardy || DEFAULT_TARDY_PENALTIES;
     const calloutPenalties = penalties.callout || DEFAULT_CALLOUT_PENALTIES;
 
+    // Pre-process violations to group consecutive callouts
+    const processedViolations = groupConsecutiveCallouts(violations);
+
     const violationsByMonth = {};
     const callouts = [];
 
-    violations.forEach(v => {
+    processedViolations.forEach(v => {
         if (v.type === VIOLATION_TYPES.CALLOUT) {
             callouts.push(v);
         } else if (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) {

@@ -27,13 +27,53 @@ const TARDY_PENALTIES = {
 
 const CALLOUT_PENALTIES = [15, 20, 25, 30, 40, 50];
 
+function groupConsecutiveCallouts(violations) {
+    // 1. Separate callouts and other violations
+    const callouts = violations.filter(v => v.type === VIOLATION_TYPES.CALLOUT);
+    const others = violations.filter(v => v.type !== VIOLATION_TYPES.CALLOUT);
+
+    if (callouts.length === 0) return others;
+
+    // 2. Sort callouts by date
+    callouts.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    // 3. Group consecutive callouts
+    const groupedCallouts = [];
+    let currentGroup = [callouts[0]];
+
+    for (let i = 1; i < callouts.length; i++) {
+        const prev = currentGroup[currentGroup.length - 1];
+        const curr = callouts[i];
+
+        const prevDate = new Date(prev.date);
+        const currDate = new Date(curr.date);
+
+        // Check if consecutive (difference is 1 day)
+        const diffTime = Math.abs(currDate - prevDate);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 1) {
+            currentGroup.push(curr);
+        } else {
+            groupedCallouts.push(currentGroup[0]);
+            currentGroup = [curr];
+        }
+    }
+    groupedCallouts.push(currentGroup[0]);
+
+    return [...others, ...groupedCallouts];
+}
+
 function calculateDeductions(violations) {
     let totalDeduction = 0;
+
+    // Pre-process violations to group consecutive callouts
+    const processedViolations = groupConsecutiveCallouts(violations);
 
     const violationsByMonth = {};
     const callouts = [];
 
-    violations.forEach(v => {
+    processedViolations.forEach(v => {
         if (v.type === VIOLATION_TYPES.CALLOUT) {
             callouts.push(v);
         } else {
@@ -97,19 +137,31 @@ console.log('Running Logic Tests...');
 // Test 1: Initial Balance
 assert(calculateCurrentPoints(STARTING_POINTS, []) === 150, 'Initial balance should be 150');
 
-const v4 = [
+// Test 2: Consecutive Callouts
+const vConsecutive = [
     { type: VIOLATION_TYPES.CALLOUT, date: '2023-01-01' },
     { type: VIOLATION_TYPES.CALLOUT, date: '2023-01-02' },
 ];
-// 150 - 35 = 115
-assert(calculateCurrentPoints(STARTING_POINTS, v4) === 115, '2 instances of Callout should deduct 35 points total');
+// Should be treated as 1 callout (15 points)
+// 150 - 15 = 135
+assert(calculateCurrentPoints(STARTING_POINTS, vConsecutive) === 135, 'Consecutive callouts should count as 1 instance (15 pts)');
 
-// Test 6: Mixed Violations
+// Test 3: Non-Consecutive Callouts
+const vNonConsecutive = [
+    { type: VIOLATION_TYPES.CALLOUT, date: '2023-01-01' },
+    { type: VIOLATION_TYPES.CALLOUT, date: '2023-01-03' }, // Gap day
+];
+// Should be treated as 2 callouts (15 + 20 = 35 points)
+// 150 - 35 = 115
+assert(calculateCurrentPoints(STARTING_POINTS, vNonConsecutive) === 115, 'Non-consecutive callouts should count as 2 instances (35 pts)');
+
+
+// Test 4: Mixed Violations
 // 1 Tardy 1-5 (-2) + 1 Callout (-15) = -17
-const v5 = [
+const vMixed = [
     { type: VIOLATION_TYPES.TARDY_1_5, date: '2023-01-01' },
     { type: VIOLATION_TYPES.CALLOUT, date: '2023-01-02' },
 ];
-assert(calculateCurrentPoints(STARTING_POINTS, v5) === 133, 'Mixed violations should sum correctly');
+assert(calculateCurrentPoints(STARTING_POINTS, vMixed) === 133, 'Mixed violations should sum correctly');
 
 console.log('All tests passed!');

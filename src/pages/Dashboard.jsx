@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useData } from '../contexts/DataContext';
 import { Users, CheckCircle, AlertTriangle, TrendingDown } from 'lucide-react';
 import StatCard from '../components/StatCard';
-import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS, groupConsecutiveCallouts } from '../utils/pointCalculator';
 import { useNavigate } from 'react-router-dom';
 
 import TierBreakdown from '../components/TierBreakdown';
@@ -27,12 +27,27 @@ const Dashboard = () => {
 
   // Filter out archived employees and their violations
   const employees = allEmployees.filter(e => !e.archived);
-  const violations = allViolations.filter(v => {
-    // Only include violations for active employees
-    return employees.some(e => e.id === v.employeeId);
+
+  // Define positive adjustment types to exclude from "violations" visuals
+  const POSITIVE_TYPES = ['Early Arrival', 'Shift Pickup'];
+
+  // Current Quarter Logic
+  const currentQuarterStart = useMemo(() => {
+    const now = new Date();
+    const quarter = Math.floor(now.getMonth() / 3);
+    return new Date(now.getFullYear(), quarter * 3, 1);
+  }, []);
+
+  // All violations for active employees IN CURRENT QUARTER (used for point calculation)
+  const allActiveViolations = allViolations.filter(v => {
+    const isActive = employees.some(e => e.id === v.employeeId);
+    const isInQuarter = new Date(v.date) >= currentQuarterStart;
+    return isActive && isInQuarter;
   });
 
-  // --- Metrics Calculation ---
+  // "Negative" violations only (for charts, trends, and problem lists)
+  const violations = allActiveViolations.filter(v => !POSITIVE_TYPES.includes(v.type));
+
   const { totalEmployees, severeCount, finalCount, goodStandingCount, coachingCount, terminationCount } = useMemo(() => {
     let severe = 0;
     let final = 0;
@@ -49,7 +64,7 @@ const Dashboard = () => {
         return;
       }
 
-      const empViolations = violations.filter(v => v.employeeId === emp.id);
+      const empViolations = allActiveViolations.filter(v => v.employeeId === emp.id);
       const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
       const tier = determineTier(points);
 
@@ -101,7 +116,8 @@ const Dashboard = () => {
   const problemEmployees = useMemo(() => {
     return employees.map(emp => {
       const empViolations = violations.filter(v => v.employeeId === emp.id);
-      const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
+      const allEmpViolations = allActiveViolations.filter(v => v.employeeId === emp.id);
+      const points = calculateCurrentPoints(data.settings.startingPoints, allEmpViolations, data.settings.violationPenalties);
       return {
         ...emp,
         points,

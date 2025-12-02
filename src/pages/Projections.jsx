@@ -319,7 +319,7 @@ const Projections = () => {
                 <h3 style={{ marginBottom: '1.5rem', fontWeight: 600 }}>Long-Term Violation Forecast</h3>
                 <div style={{ height: '400px' }}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={[...typeData, ...forecastData]}>
+                        <AreaChart data={[...typeData.slice(-5), ...forecastData]}>
                             <defs>
                                 <linearGradient id="colorCallout" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1} />

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useData } from '../contexts/DataContext';
-import { calculateCurrentPoints, determineTier, STARTING_POINTS, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, STARTING_POINTS, VIOLATION_TYPES, groupConsecutiveCallouts } from '../utils/pointCalculator';
 import { Trophy, AlertCircle, Calendar } from 'lucide-react';
 
 const Scorecard = () => {
@@ -87,7 +87,9 @@ const Scorecard = () => {
                     [VIOLATION_TYPES.CALLOUT]: 0
                 };
 
-                quarterViolations.forEach(v => {
+                const groupedQuarterViolations = groupConsecutiveCallouts(quarterViolations);
+
+                groupedQuarterViolations.forEach(v => {
                     if (counts[v.type] !== undefined) {
                         counts[v.type]++;
                     }

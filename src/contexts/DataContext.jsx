@@ -2,6 +2,7 @@ import React, { createContext, useState, useEffect, useCallback, useContext } fr
 import { supabase } from '../utils/supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
 import { calculateCurrentPoints, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
+import { getCurrentQuarterDates } from '../utils/dateUtils';
 import { useAuth } from './AuthContext';
 
 const DataContext = createContext();
@@ -253,7 +254,13 @@ export function DataProvider({ children }) {
                 pointsDeducted: newViolation.points_deducted
             }];
 
-            const currentPoints = calculateCurrentPoints(data.settings.startingPoints, allViolationsForEmployee, data.settings.violationPenalties);
+            const { startDate, endDate } = getCurrentQuarterDates();
+            const currentQuarterViolations = allViolationsForEmployee.filter(v => {
+                const vDate = new Date(v.date);
+                return vDate >= startDate && vDate <= endDate;
+            });
+
+            const currentPoints = calculateCurrentPoints(data.settings.startingPoints, currentQuarterViolations, data.settings.violationPenalties);
 
             let empError = null;
             if (!isOfflineMode) {
@@ -306,7 +313,14 @@ export function DataProvider({ children }) {
             v.id === updatedViolation.id ? updatedViolation : v
         );
         const allViolationsForEmployee = updatedViolations.filter(v => v.employeeId === employeeId);
-        const currentPoints = calculateCurrentPoints(data.settings.startingPoints, allViolationsForEmployee, data.settings.violationPenalties);
+
+        const { startDate, endDate } = getCurrentQuarterDates();
+        const currentQuarterViolations = allViolationsForEmployee.filter(v => {
+            const vDate = new Date(v.date);
+            return vDate >= startDate && vDate <= endDate;
+        });
+
+        const currentPoints = calculateCurrentPoints(data.settings.startingPoints, currentQuarterViolations, data.settings.violationPenalties);
 
         let empError = null;
         if (!isOfflineMode) {
@@ -341,7 +355,14 @@ export function DataProvider({ children }) {
         const employeeId = violationToDelete.employeeId;
         const updatedViolations = data.violations.filter(v => v.id !== violationId);
         const allViolationsForEmployee = updatedViolations.filter(v => v.employeeId === employeeId);
-        const currentPoints = calculateCurrentPoints(data.settings.startingPoints, allViolationsForEmployee, data.settings.violationPenalties);
+
+        const { startDate, endDate } = getCurrentQuarterDates();
+        const currentQuarterViolations = allViolationsForEmployee.filter(v => {
+            const vDate = new Date(v.date);
+            return vDate >= startDate && vDate <= endDate;
+        });
+
+        const currentPoints = calculateCurrentPoints(data.settings.startingPoints, currentQuarterViolations, data.settings.violationPenalties);
 
         let empError = null;
         if (!isOfflineMode) {
@@ -391,9 +412,16 @@ export function DataProvider({ children }) {
         if (newSettings.startingPoints !== undefined && newSettings.startingPoints !== data.settings.startingPoints) {
             updatedEmployees = data.employees.map(employee => {
                 const allViolationsForEmployee = data.violations.filter(v => v.employeeId === employee.id);
+
+                const { startDate, endDate } = getCurrentQuarterDates();
+                const currentQuarterViolations = allViolationsForEmployee.filter(v => {
+                    const vDate = new Date(v.date);
+                    return vDate >= startDate && vDate <= endDate;
+                });
+
                 const currentPoints = calculateCurrentPoints(
                     newSettings.startingPoints,
-                    allViolationsForEmployee,
+                    currentQuarterViolations,
                     newSettings.violationPenalties || data.settings.violationPenalties
                 );
                 return { ...employee, currentPoints };
@@ -466,6 +494,24 @@ export function DataProvider({ children }) {
                 employees: prev.employees.map(emp => emp.id === updatedEmployee.id ? { ...updatedEmployee, active } : emp)
             }));
         }
+        return { error };
+    };
+
+    const deleteEmployee = async (employeeId) => {
+        let error = null;
+        if (!isOfflineMode) {
+            const { error: dbError } = await supabase.from('employees').delete().eq('id', employeeId);
+            error = dbError;
+        }
+
+        if (!error) {
+            setData(prev => ({
+                ...prev,
+                employees: prev.employees.filter(emp => emp.id !== employeeId),
+                violations: prev.violations.filter(v => v.employeeId !== employeeId)
+            }));
+        }
+        return { error };
     };
 
     const logReportUsage = async (reportId) => {
@@ -494,8 +540,124 @@ export function DataProvider({ children }) {
     };
 
     const importDatabase = async (file) => {
-        console.warn("Import not fully implemented for Supabase backend yet.");
-        return { success: false, error: "Import not supported yet" };
+        try {
+            const { importData } = await import('../utils/backup');
+            const importedData = await importData(file);
+
+            if (!importedData) {
+                return { success: false, error: "Failed to parse data" };
+            }
+
+            // Validate structure
+            if (!importedData.employees || !Array.isArray(importedData.employees)) {
+                return { success: false, error: "Invalid backup format: missing employees" };
+            }
+
+            if (isOfflineMode) {
+                // For offline mode, we can just replace the state
+                // Merge with defaults to ensure safety
+                const mergedData = {
+                    employees: importedData.employees || [],
+                    violations: importedData.violations || [],
+                    quarters: importedData.quarters || [],
+                    issuedDAs: importedData.issuedDAs || [],
+                    settings: {
+                        ...data.settings,
+                        ...(importedData.settings || {}),
+                        violationPenalties: {
+                            ...data.settings.violationPenalties,
+                            ...(importedData.settings?.violationPenalties || {})
+                        }
+                    }
+                };
+
+                setData(mergedData);
+                // The useEffect will catch this change and save it to persistence
+                return { success: true };
+            }
+
+            // Online Mode (Supabase)
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return { success: false, error: "Not authenticated" };
+
+            // 1. Upsert Settings
+            if (importedData.settings) {
+                const dbSettings = {
+                    company_name: importedData.settings.companyName,
+                    starting_points: importedData.settings.startingPoints,
+                    violation_penalties: importedData.settings.violationPenalties,
+                    report_usage: importedData.settings.reportUsage,
+                    user_id: user.id,
+                    organization_id: organizationId
+                };
+
+                // Check if settings exist to decide update vs insert
+                const { data: existingArray } = await supabase.from('settings').select('id').eq('organization_id', organizationId).limit(1);
+                const existing = existingArray?.[0];
+
+                if (existing) {
+                    await supabase.from('settings').update(dbSettings).eq('id', existing.id);
+                } else {
+                    await supabase.from('settings').insert([dbSettings]);
+                }
+            }
+
+            // 2. Upsert Employees
+            if (importedData.employees && importedData.employees.length > 0) {
+                const dbEmployees = importedData.employees.map(e => ({
+                    id: e.id,
+                    user_id: user.id,
+                    organization_id: organizationId,
+                    name: e.name,
+                    start_date: e.startDate,
+                    active: e.active !== undefined ? e.active : !e.archived,
+                    archived_date: e.archivedDate,
+                    current_points: e.currentPoints,
+                    tier: e.tier
+                }));
+
+                const { error: empError } = await supabase.from('employees').upsert(dbEmployees);
+                if (empError) throw empError;
+            }
+
+            // 3. Upsert Violations
+            if (importedData.violations && importedData.violations.length > 0) {
+                const dbViolations = importedData.violations.map(v => ({
+                    id: v.id,
+                    user_id: user.id,
+                    organization_id: organizationId,
+                    employee_id: v.employeeId,
+                    type: v.type,
+                    date: v.date,
+                    shift: v.shift,
+                    points_deducted: v.pointsDeducted
+                }));
+
+                const { error: vioError } = await supabase.from('violations').upsert(dbViolations);
+                if (vioError) throw vioError;
+            }
+
+            // 4. Upsert Issued DAs
+            if (importedData.issuedDAs && importedData.issuedDAs.length > 0) {
+                const dbDAs = importedData.issuedDAs.map(daKey => ({
+                    da_key: daKey,
+                    user_id: user.id,
+                    organization_id: organizationId
+                }));
+
+                // Ignore duplicates for DAs
+                const { error: daError } = await supabase.from('issued_das').upsert(dbDAs, { onConflict: 'da_key, organization_id' });
+                if (daError) throw daError;
+            }
+
+            // Reload data to reflect changes
+            await load();
+            return { success: true };
+
+        } catch (error) {
+            console.error("Import failed:", error);
+            return { success: false, error: error.message };
+        }
     };
 
     const value = {
@@ -511,6 +673,7 @@ export function DataProvider({ children }) {
         issueDA,
         updateSettings,
         updateEmployee,
+        deleteEmployee,
         logReportUsage,
         isOfflineMode
     };

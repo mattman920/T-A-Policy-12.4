@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useData } from '../contexts/DataContext';
 import Modal from '../components/Modal';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, calculateDeductions } from '../utils/pointCalculator';
+import { getCurrentQuarterDates } from '../utils/dateUtils';
 import { Search, Upload, Archive, UserPlus, FileText, Filter, Trash2 } from 'lucide-react';
 import Papa from 'papaparse';
 
@@ -38,7 +39,11 @@ const Employees = () => {
         e.preventDefault();
         if (selectedEmployee) {
             // Calculate marginal deduction
-            const empViolations = data.violations.filter(v => v.employeeId === selectedEmployee.id);
+            const { startDate, endDate } = getCurrentQuarterDates();
+            const empViolations = data.violations.filter(v => {
+                const vDate = new Date(v.date);
+                return v.employeeId === selectedEmployee.id && vDate >= startDate && vDate <= endDate;
+            });
             const currentDeductions = calculateDeductions(empViolations, data.settings.violationPenalties);
 
             const newViolation = { type: violationType, date: violationDate };
@@ -210,7 +215,11 @@ const Employees = () => {
                 gap: '1.5rem'
             }}>
                 {filteredEmployees.map(employee => {
-                    const empViolations = data.violations.filter(v => v.employeeId === employee.id);
+                    const { startDate, endDate } = getCurrentQuarterDates();
+                    const empViolations = data.violations.filter(v => {
+                        const vDate = new Date(v.date);
+                        return v.employeeId === employee.id && vDate >= startDate && vDate <= endDate;
+                    });
                     const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
                     const tier = determineTier(points);
 
