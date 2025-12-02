@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 import { TrendingUp, Activity, AlertTriangle, Calendar, Users } from 'lucide-react';
 import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, AreaChart, Area

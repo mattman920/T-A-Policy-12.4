@@ -1,5 +1,5 @@
 import React from 'react';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';

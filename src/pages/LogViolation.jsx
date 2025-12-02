@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 import { calculateDeductions, calculateCurrentPoints, STARTING_POINTS, VIOLATION_TYPES } from '../utils/pointCalculator';
 import { AlertTriangle, CheckCircle, User, Calendar, Clock, Edit2, ArrowLeft, Save, X, Trash2, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -149,7 +149,22 @@ const LogViolation = () => {
     const handleUpdateViolation = async (e) => {
         e.preventDefault();
         try {
-            await updateViolation(editingViolation);
+            // Calculate the correct points deducted for this violation in its new state
+            const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
+            const currentPointsWithoutThis = calculateCurrentPoints(data.settings.startingPoints, otherViolations, data.settings.violationPenalties);
+
+            const newPointsWithThis = calculateCurrentPoints(data.settings.startingPoints, [...otherViolations, editingViolation], data.settings.violationPenalties);
+            const impact = newPointsWithThis - currentPointsWithoutThis;
+
+            // Update the violation with the calculated points (absolute value for storage, usually)
+            // But wait, pointsDeducted is usually positive for deductions.
+            // If impact is positive (added points), pointsDeducted might be stored as positive too?
+            // Let's check how addViolation does it.
+            // addViolation: const pointsToLog = Math.abs(impact);
+
+            const pointsToLog = Math.abs(impact);
+
+            await updateViolation({ ...editingViolation, pointsDeducted: pointsToLog });
             setEditModalOpen(false);
             setEditingViolation(null);
             alert('Violation updated successfully!');
@@ -665,6 +680,39 @@ const LogViolation = () => {
                                 <option value="PM">PM</option>
                             </select>
                         </div>
+                        {/* Recalculate points logic */}
+                        {editingViolation && (
+                            <div style={{
+                                backgroundColor: 'var(--bg-primary)',
+                                padding: '1rem',
+                                borderRadius: 'var(--radius-md)',
+                                marginTop: '0.5rem',
+                                border: '1px solid var(--border-color)'
+                            }}>
+                                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Estimated Points Impact</p>
+                                <p style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                                    {(() => {
+                                        // Calculate impact dynamically
+                                        const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
+                                        const currentPointsWithoutThis = calculateCurrentPoints(data.settings.startingPoints, otherViolations, data.settings.violationPenalties);
+
+                                        // Construct temp violation for calculation
+                                        const tempViolation = {
+                                            ...editingViolation,
+                                            // Ensure date is string YYYY-MM-DD
+                                        };
+
+                                        const newPointsWithThis = calculateCurrentPoints(data.settings.startingPoints, [...otherViolations, tempViolation], data.settings.violationPenalties);
+                                        const impact = newPointsWithThis - currentPointsWithoutThis;
+
+                                        // Update the editingViolation pointsDeducted if it changed (careful with infinite loop, so just display here and update on submit)
+                                        // Actually, we should update the state so it saves correctly.
+                                        // Let's use a useEffect for that.
+                                        return impact >= 0 ? `+${impact}` : impact;
+                                    })()}
+                                </p>
+                            </div>
+                        )}
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem' }}>
                             <button
                                 type="button"

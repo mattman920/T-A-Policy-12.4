@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 import { Users, CheckCircle, AlertTriangle, TrendingDown } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';

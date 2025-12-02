@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 import Modal from '../components/Modal';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, calculateDeductions } from '../utils/pointCalculator';
 import { Search, Upload, Archive, UserPlus, FileText, Filter, Trash2 } from 'lucide-react';

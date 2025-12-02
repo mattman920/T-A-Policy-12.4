@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, TrendingUp, Moon, Sun, Settings, AlertCircle, ClipboardList, LogOut } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 
 const Sidebar = () => {
     const { isDark, toggleTheme } = useTheme();

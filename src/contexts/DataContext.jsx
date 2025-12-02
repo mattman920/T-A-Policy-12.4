@@ -11,6 +11,10 @@ export function DataProvider({ children }) {
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const isOfflineMode = isLocal && !session;
 
+    useEffect(() => {
+        // DataProvider mounted
+    }, []);
+
     const [data, setData] = useState({
         employees: [],
         violations: [],
@@ -33,42 +37,44 @@ export function DataProvider({ children }) {
         setLoading(true);
         try {
             if (isOfflineMode) {
-                // If we already have data in memory (from previous load or updates), don't reset it to empty!
-                // This is the key fix for persistence.
-                // However, on first load (refresh), it will be empty.
-                // If we want it to persist across refreshes, we'd need localStorage.
-                // But the user said "when I switch tabs... data resets". This implies component unmounting reset state.
-                // By moving state to Context, it will persist as long as the App is mounted (which it is, unless page refresh).
+                let loadedData = null;
 
-                // Only initialize if empty? No, we want to start fresh on refresh, but persist during session.
-                // The state in Context persists as long as the Provider is mounted.
-                // So we just need to initialize once.
+                if (window.electron) {
+                    try {
+                        loadedData = await window.electron.readData();
+                    } catch (e) {
+                        console.error("Failed to read data from Electron:", e);
+                    }
+                } else {
+                    const localData = localStorage.getItem('attendance_tracker_local_data');
+                    if (localData) {
+                        try {
+                            loadedData = JSON.parse(localData);
+                        } catch (e) {
+                            console.error("Failed to parse local data", e);
+                        }
+                    }
+                }
 
-                // Actually, if we are in offline mode, we might want to check if we have data already?
-                // But `load` is called on mount.
-                // If we want to persist across *page refreshes*, we need localStorage.
-                // The user said "when I close the tab... data resets but while im testing I want data to remain".
-                // So just Context is enough for "switching tabs" (if they meant browser tabs, then the app is still running in one tab).
-                // Wait, "switch tabs to test something" usually means navigating within the app (client-side routing).
-                // If they meant browser tabs, then each tab is a separate instance.
-                // If they meant "Tabs" in the UI (e.g. Dashboard -> Employees), then Context fixes it.
-
-                // Let's assume they meant navigating within the app.
-                // We should only set default empty data if we haven't initialized yet?
-                // Or just don't re-set it if it's already populated?
-                // But `data` is state.
-
-                // Let's just set it to default structure if it's "empty" or just return if we want to keep current state?
-                // But `load` is usually called to *refresh* data.
-                // In offline mode, "refresh" might mean "reset" or "do nothing".
-                // Let's make it do nothing if we already have data, OR just set defaults if it's the very first load.
-                // But `data` is initialized with defaults in `useState`.
-                // So we can just stop loading.
-
-                // Wait, the `useState` initial value above has empty arrays.
-                // So we should set the *structure* with defaults if needed.
-
-                if (data.employees.length === 0 && data.settings.companyName === 'Attendance') {
+                if (loadedData) {
+                    // Merge with default structure to ensure new fields are present
+                    const mergedData = {
+                        employees: loadedData.employees || [],
+                        violations: loadedData.violations || [],
+                        quarters: loadedData.quarters || [],
+                        issuedDAs: loadedData.issuedDAs || [],
+                        settings: {
+                            ...data.settings, // Start with defaults
+                            ...loadedData.settings, // Override with saved
+                            violationPenalties: {
+                                ...data.settings.violationPenalties,
+                                ...(loadedData.settings?.violationPenalties || {})
+                            }
+                        }
+                    };
+                    setData(mergedData);
+                } else if (data.employees.length === 0 && data.settings.companyName === 'Attendance') {
+                    // Only set default name if no data found
                     setData(prev => ({
                         ...prev,
                         settings: {
@@ -153,6 +159,17 @@ export function DataProvider({ children }) {
     useEffect(() => {
         load();
     }, [load]);
+
+    // Save to persistence (Electron file or localStorage) whenever data changes in offline mode
+    useEffect(() => {
+        if (isOfflineMode && !loading) {
+            if (window.electron) {
+                window.electron.writeData(data).catch(err => console.error("Failed to write data to Electron:", err));
+            } else {
+                localStorage.setItem('attendance_tracker_local_data', JSON.stringify(data));
+            }
+        }
+    }, [data, isOfflineMode, loading]);
 
     const addEmployee = async (name, startDate) => {
         let userId = 'local-user';
@@ -494,7 +511,8 @@ export function DataProvider({ children }) {
         issueDA,
         updateSettings,
         updateEmployee,
-        logReportUsage
+        logReportUsage,
+        isOfflineMode
     };
 
     return (

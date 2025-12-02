@@ -88,7 +88,13 @@ export function useData() {
                 // Let's map DB snake_case to app camelCase
                 companyName: loadedSettings.company_name || defaultSettings.companyName,
                 startingPoints: loadedSettings.starting_points !== undefined ? loadedSettings.starting_points : defaultSettings.startingPoints,
-                violationPenalties: loadedSettings.violation_penalties || defaultSettings.violationPenalties,
+                violationPenalties: {
+                    ...defaultSettings.violationPenalties,
+                    ...(loadedSettings.violation_penalties || {}),
+                    tardy: { ...defaultSettings.violationPenalties.tardy, ...(loadedSettings.violation_penalties?.tardy || {}) },
+                    callout: loadedSettings.violation_penalties?.callout || defaultSettings.violationPenalties.callout,
+                    positiveAdjustments: { ...defaultSettings.violationPenalties.positiveAdjustments, ...(loadedSettings.violation_penalties?.positiveAdjustments || {}) }
+                },
                 reportUsage: loadedSettings.report_usage || defaultSettings.reportUsage
             };
 

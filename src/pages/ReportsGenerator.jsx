@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';
 import {
     FileText, Printer, ChevronRight, Download, FileSpreadsheet, BarChart2, Search,

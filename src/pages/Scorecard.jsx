@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useData } from '../hooks/useData';
+import { useData } from '../contexts/DataContext';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, VIOLATION_TYPES } from '../utils/pointCalculator';
 import { Trophy, AlertCircle, Calendar } from 'lucide-react';
 

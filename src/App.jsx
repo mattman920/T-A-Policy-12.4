@@ -1,7 +1,6 @@
 import React from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { DataProvider } from './contexts/DataContext';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Employees from './pages/Employees';
@@ -47,24 +46,22 @@ function App() {
           ⚠️ Local Dev Mode: Login Bypassed (Read-Only/Limited Access)
         </div>
       )}
-      <DataProvider>
-        <HashRouter>
-          <Routes>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="employees" element={<Employees />} />
-              <Route path="reports" element={<ReportsGenerator />} />
-              <Route path="projections" element={<Projections />} />
-              <Route path="da-issuance" element={<DAIssuance />} />
-              <Route path="log-violation" element={<LogViolation />} />
-              <Route path="scorecard" element={<Scorecard />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="settings/general" element={<GeneralConfiguration />} />
-              <Route path="settings/violations" element={<ViolationPenalties />} />
-            </Route>
-          </Routes>
-        </HashRouter>
-      </DataProvider>
+      <HashRouter>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="employees" element={<Employees />} />
+            <Route path="reports" element={<ReportsGenerator />} />
+            <Route path="projections" element={<Projections />} />
+            <Route path="da-issuance" element={<DAIssuance />} />
+            <Route path="log-violation" element={<LogViolation />} />
+            <Route path="scorecard" element={<Scorecard />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="settings/general" element={<GeneralConfiguration />} />
+            <Route path="settings/violations" element={<ViolationPenalties />} />
+          </Route>
+        </Routes>
+      </HashRouter>
     </ThemeProvider>
   );
 }
