@@ -28,6 +28,11 @@ export const DEFAULT_TARDY_PENALTIES = {
 
 export const DEFAULT_CALLOUT_PENALTIES = [15, 20, 25, 30, 40, 50]; // 6th is 50
 
+export const DEFAULT_POSITIVE_ADJUSTMENTS = {
+    'Early Arrival': 1,
+    'Shift Pickup': 5
+};
+
 /**
  * Calculates the total points deducted for a list of violations in a quarter.
  * @param {Array} violations - List of violation objects { type, date }
