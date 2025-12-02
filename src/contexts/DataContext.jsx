@@ -94,7 +94,12 @@ export function DataProvider({ children }) {
             const { data: violations, error: vioError } = await supabase.from('violations').select('*');
             if (vioError) throw vioError;
 
-            const { data: settingsData, error: setError } = await supabase.from('settings').select('*').single();
+            let settingsQuery = supabase.from('settings').select('*');
+            if (organizationId) {
+                settingsQuery = settingsQuery.eq('organization_id', organizationId);
+            }
+            const { data: settingsData, error: setError } = await settingsQuery.limit(1).maybeSingle();
+
             const { data: issuedDasData, error: daError } = await supabase.from('issued_das').select('da_key');
             if (daError) throw daError;
 
