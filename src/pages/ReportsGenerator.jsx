@@ -34,8 +34,15 @@ const reports = [
 ];
 const ReportsGenerator = () => {
     const { data, loading, logReportUsage } = useData();
-    const employees = data?.employees || [];
-    const violations = data?.violations || [];
+    const allEmployees = data?.employees || [];
+    const allViolations = data?.violations || [];
+
+    // Filter out archived employees and their violations
+    const employees = allEmployees.filter(e => !e.archived);
+    const violations = allViolations.filter(v => {
+        const emp = allEmployees.find(e => e.id === v.employeeId);
+        return emp && !emp.archived;
+    });
     const [selectedReportId, setSelectedReportId] = useState(null);
     const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
     const [searchQuery, setSearchQuery] = useState('');

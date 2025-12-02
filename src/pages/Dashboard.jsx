@@ -20,8 +20,16 @@ const Dashboard = () => {
   const [isTerminationsModalOpen, setIsTerminationsModalOpen] = useState(false);
 
   // Safe data access
-  const employees = data?.employees || [];
-  const violations = data?.violations || [];
+  // Safe data access
+  const allEmployees = data?.employees || [];
+  const allViolations = data?.violations || [];
+
+  // Filter out archived employees and their violations
+  const employees = allEmployees.filter(e => !e.archived);
+  const violations = allViolations.filter(v => {
+    const emp = allEmployees.find(e => e.id === v.employeeId);
+    return emp && !emp.archived;
+  });
 
   // --- Metrics Calculation ---
   const { totalEmployees, severeCount, finalCount, goodStandingCount, coachingCount, terminationCount } = useMemo(() => {
@@ -34,7 +42,7 @@ const Dashboard = () => {
     // Get issued DAs from data context
     const issuedDAs = data?.issuedDAs || [];
 
-    employees.forEach(emp => {
+    allEmployees.forEach(emp => {
       if (emp.archived) {
         terminations++;
         return;
@@ -67,7 +75,7 @@ const Dashboard = () => {
       coachingCount: coaching,
       terminationCount: terminations
     };
-  }, [employees, violations, data?.issuedDAs]);
+  }, [employees, violations, data?.issuedDAs, allEmployees]);
 
   // --- Chart Data ---
   const violationsByMonth = useMemo(() => {
@@ -166,7 +174,7 @@ const Dashboard = () => {
       <TerminationsReportModal
         isOpen={isTerminationsModalOpen}
         onClose={() => setIsTerminationsModalOpen(false)}
-        employees={employees}
+        employees={allEmployees}
       />
 
       {/* Tier Breakdown */}

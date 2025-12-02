@@ -7,8 +7,15 @@ import {
 
 const Projections = () => {
     const { data, loading } = useData();
-    const violations = data?.violations || [];
-    const employees = data?.employees || [];
+    const allEmployees = data?.employees || [];
+    const allViolations = data?.violations || [];
+
+    // Filter out archived employees and their violations
+    const employees = allEmployees.filter(e => !e.archived);
+    const violations = allViolations.filter(v => {
+        const emp = allEmployees.find(e => e.id === v.employeeId);
+        return emp && !emp.archived;
+    });
 
     // --- Logic: Forecast & Trends ---
 

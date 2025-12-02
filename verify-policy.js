@@ -1,8 +1,7 @@
 
 // --- MOCKED LOGIC FROM pointCalculator.js ---
 
-const STARTING_POINTS = 150;
-const MAX_POINTS = 150;
+const STARTING_POINTS = 25;
 
 const TIERS = {
     GOOD: { name: 'Good Standing', min: 125, nextStart: 150, maxBonus: 150 },
@@ -77,10 +76,10 @@ function calculateDeductions(violations) {
     return totalDeduction;
 }
 
-function calculateCurrentPoints(startBalance, violations, bonusPoints = 0) {
+function calculateCurrentPoints(startBalance, violations, bonusPoints = 0, maxPoints = 150) {
     const deductions = calculateDeductions(violations);
     let points = startBalance - deductions + bonusPoints;
-    return Math.min(points, MAX_POINTS);
+    return Math.min(points, maxPoints);
 }
 
 function determineTier(points) {
@@ -103,19 +102,18 @@ function calculateMonthlyBonus(violationsInMonth, shiftsWorked) {
 
 // --- NEW LOGIC: QUARTER TRANSITION ---
 
-function calculateNextQuarterStart(endingPoints, quarterlyBonusPoints) {
-    const tier = determineTier(endingPoints);
-    const baseStart = tier.nextStart;
+function calculateNextQuarterStart(lowestQuarterlyPoints, quarterlyBonusPoints, maxPoints = 150) {
+    const lowestTier = determineTier(lowestQuarterlyPoints);
+    let baseStart = lowestTier.nextStart;
 
-    // "Bonus points can affect next quarter's starting balance (up to 15 points)"
+    // Override for Good Standing to match dynamic maxPoints
+    if (lowestTier.name === TIERS.GOOD.name) {
+        baseStart = maxPoints;
+    }
+
     const bonusToApply = Math.min(quarterlyBonusPoints, 15);
-
-    // "Cannot skip multiple levels regardless of bonus points earned"
-    // "Max potential" is defined in TIERS.
-    const maxPotential = tier.maxBonus;
-
     const calculatedStart = baseStart + bonusToApply;
-    return Math.min(calculatedStart, maxPotential);
+    return Math.min(calculatedStart, maxPoints);
 }
 
 // --- VERIFICATION TESTS ---
@@ -179,22 +177,29 @@ assert(determineTier(60).name === 'Severe', '60 -> Severe');
 assert(determineTier(40).name === 'Final', '40 -> Final');
 assert(determineTier(-10).name === 'Termination Review', '-10 -> Termination');
 
-// 5. QUARTER PROGRESSION
-console.log('\nTesting Quarter Progression...');
-// Scenario A: Good Standing (130 pts) + 15 bonus -> Starts at 150 (Max 150)
-const nextA = calculateNextQuarterStart(130, 15);
-assert(nextA === 150, `Progression Good: Expected 150, Got ${nextA}`);
+// 5. QUARTER PROGRESSION & DYNAMIC CAP
+console.log('\nTesting Quarter Progression & Dynamic Cap...');
 
-// Scenario B: Coaching (100 pts) + 15 bonus -> Starts at 125 + 15 = 140
-const nextB = calculateNextQuarterStart(100, 15);
-assert(nextB === 140, `Progression Coaching w/ Bonus: Expected 140, Got ${nextB}`);
+// Scenario A: Good Standing (Lowest 130) + 15 bonus -> Starts at 150 (Default Max 150)
+const nextA = calculateNextQuarterStart(130, 15, 150);
+assert(nextA === 150, `Progression Good (Default): Expected 150, Got ${nextA}`);
 
-// Scenario C: Coaching (100 pts) + 0 bonus -> Starts at 125
-const nextC = calculateNextQuarterStart(100, 0);
-assert(nextC === 125, `Progression Coaching No Bonus: Expected 125, Got ${nextC}`);
+// Scenario B: Good Standing (Lowest 130) + 15 bonus -> Starts at 160 (Custom Max 160)
+const nextB = calculateNextQuarterStart(130, 15, 160);
+assert(nextB === 160, `Progression Good (Custom 160): Expected 160, Got ${nextB}`);
 
-// Scenario D: Severe (60 pts) + 20 bonus (capped at 15) -> Starts at 100 + 15 = 115
-const nextD = calculateNextQuarterStart(60, 20);
+// Scenario C: Coaching (Lowest 100) + 15 bonus -> Starts at 125 + 15 = 140 (Max 150)
+const nextC = calculateNextQuarterStart(100, 15, 150);
+assert(nextC === 140, `Progression Coaching w/ Bonus: Expected 140, Got ${nextC}`);
+
+// Scenario D: Severe (Lowest 60) + 20 bonus (capped at 15) -> Starts at 100 + 15 = 115
+const nextD = calculateNextQuarterStart(60, 20, 150);
 assert(nextD === 115, `Progression Severe w/ Capped Bonus: Expected 115, Got ${nextD}`);
+
+// Scenario E: "Sticky Status" - Ended High but Dipped Low
+// Employee dropped to 60 (Severe) but climbed back to 130 (Good).
+// Should reset based on LOWEST (Severe) -> Start at 100.
+const nextE = calculateNextQuarterStart(60, 15, 150);
+assert(nextE === 115, `Sticky Status (Lowest 60): Expected 115 (Severe Start + Bonus), Got ${nextE}`);
 
 console.log('\n--- ALL POLICY CHECKS PASSED ---');

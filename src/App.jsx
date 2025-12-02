@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import Layout from './components/Layout';
@@ -13,33 +13,17 @@ import Scorecard from './pages/Scorecard';
 import GeneralConfiguration from './pages/GeneralConfiguration';
 import ViolationPenalties from './pages/ViolationPenalties';
 import Login from './components/Login';
-import { supabase } from './utils/supabaseClient';
+import { useAuth } from './contexts/AuthContext';
 
 function App() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  const { session, loading } = useAuth();
 
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>Loading...</div>;
   }
 
   if (!session) {
-    return <Login onLoginSuccess={setSession} />;
+    return <Login />;
   }
 
   return (

@@ -2,14 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { useData } from '../hooks/useData';
 import { AlertTriangle, Save, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES } from '../utils/pointCalculator';
+import { DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
 
 const ViolationPenalties = () => {
     const { data, updateSettings } = useData();
     const navigate = useNavigate();
     const [violationPenalties, setViolationPenalties] = useState(data?.settings?.violationPenalties || {
         tardy: DEFAULT_TARDY_PENALTIES,
-        callout: DEFAULT_CALLOUT_PENALTIES
+        callout: DEFAULT_CALLOUT_PENALTIES,
+        positiveAdjustments: DEFAULT_POSITIVE_ADJUSTMENTS
     });
 
     useEffect(() => {
@@ -38,6 +39,12 @@ const ViolationPenalties = () => {
         const newCallout = [...violationPenalties.callout];
         newCallout[index] = parseInt(value) || 0;
         setViolationPenalties({ ...violationPenalties, callout: newCallout });
+    };
+
+    const handlePositiveAdjustmentChange = (type, value) => {
+        const newAdjustments = { ...violationPenalties.positiveAdjustments };
+        newAdjustments[type] = parseInt(value) || 0;
+        setViolationPenalties({ ...violationPenalties, positiveAdjustments: newAdjustments });
     };
 
     const sectionStyle = {
@@ -159,6 +166,31 @@ const ViolationPenalties = () => {
                                     value={val}
                                     onChange={(e) => handleCalloutChange(idx, e.target.value)}
                                     style={{ ...inputStyle, padding: '0.5rem', textAlign: 'center' }}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div style={{ marginTop: '2rem' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--text-primary)' }}>Positive Adjustments (Points Added)</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '1rem' }}>
+                        {Object.entries(violationPenalties.positiveAdjustments || {}).map(([type, val]) => (
+                            <div key={type} style={{
+                                backgroundColor: 'var(--bg-primary)',
+                                padding: '0.75rem',
+                                borderRadius: 'var(--radius-md)',
+                                border: '1px solid var(--border-color)',
+                                boxShadow: 'var(--shadow-sm)'
+                            }}>
+                                <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                                    {type}
+                                </label>
+                                <input
+                                    type="number"
+                                    value={val}
+                                    onChange={(e) => handlePositiveAdjustmentChange(type, e.target.value)}
+                                    style={{ ...inputStyle, padding: '0.5rem', textAlign: 'center', color: 'var(--accent-success)' }}
                                 />
                             </div>
                         ))}

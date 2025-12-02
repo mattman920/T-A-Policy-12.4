@@ -1,7 +1,5 @@
-
 // Constants
-export const MAX_POINTS = 150;
-export const STARTING_POINTS = 25;
+export const STARTING_POINTS = 25; // Default fallback
 
 export const TIERS = {
     GOOD: { name: 'Good Standing', min: 125, nextStart: 150, maxBonus: 150 }, // maxBonus is effectively cap
@@ -99,12 +97,13 @@ export function calculateDeductions(violations, penalties = {}) {
  * @param {Array} violations - List of violations
  * @param {Object} penalties - Optional custom penalties configuration
  * @param {number} bonusPoints - Total bonus points earned (optional input if tracked separately)
+ * @param {number} maxPoints - Maximum points cap (default 150)
  * @returns {number} Current points
  */
-export function calculateCurrentPoints(startBalance, violations, penalties = {}, bonusPoints = 0) {
+export function calculateCurrentPoints(startBalance, violations, penalties = {}, bonusPoints = 0, maxPoints = 150) {
     const deductions = calculateDeductions(violations, penalties);
     let points = startBalance - deductions + bonusPoints;
-    return Math.min(points, MAX_POINTS); // Cap at 150
+    return Math.min(points, maxPoints);
 }
 
 /**
@@ -146,29 +145,45 @@ export function calculateMonthlyBonus(violationsInMonth, shiftsWorked) {
     // So yes, they stack.
 
     if (!hasTardiness) {
-        bonus += 5;
+        bonus += 5; // No Tardiness
     }
 
     return Math.min(bonus, 15);
 }
 
 /**
- * Calculates the starting balance for the next quarter based on ending status and bonus.
- * @param {number} endingPoints - Points at the end of the quarter
+ * Calculates the starting balance for the next quarter based on lowest status and bonus.
+ * @param {number} lowestQuarterlyPoints - Lowest points balance reached during the quarter
  * @param {number} quarterlyBonusPoints - Total bonus points earned in the quarter (capped at 45 for accumulation, but only 15 apply here)
+ * @param {number} maxPoints - The configured starting points cap (e.g., 150)
  * @returns {number} Starting balance for next quarter
  */
-export function calculateNextQuarterStart(endingPoints, quarterlyBonusPoints) {
-    const tier = determineTier(endingPoints);
-    const baseStart = tier.nextStart;
+export function calculateNextQuarterStart(lowestQuarterlyPoints, quarterlyBonusPoints, maxPoints = 150) {
+    // 1. Determine the lowest tier reached
+    const lowestTier = determineTier(lowestQuarterlyPoints);
 
-    // "Bonus points can affect next quarter's starting balance (up to 15 points)"
+    // 2. Determine Base Start for Next Quarter (Progression Logic)
+    // "If an employee maintains a score above the next lower threshold for a full quarter... they move up one level"
+    // This implies if they ended in a tier, they start at that tier's reset level, UNLESS they were never below it.
+    // Since we are passing `lowestQuarterlyPoints`, we know the absolute floor they hit.
+    // If lowest was Severe (e.g. 60), they reset to Severe Start (100).
+    // If lowest was Coaching (e.g. 90), they reset to Coaching Start (125).
+    // If lowest was Good (e.g. 130), they reset to Good Start (maxPoints).
+
+    let baseStart = lowestTier.nextStart;
+
+    // Override for Good Standing to match dynamic maxPoints
+    if (lowestTier.name === TIERS.GOOD.name) {
+        baseStart = maxPoints;
+    }
+
+    // 3. Apply Bonus
+    // "Bonus points applied to the starting balance are capped at 15 points total."
     const bonusToApply = Math.min(quarterlyBonusPoints, 15);
 
-    // "Cannot skip multiple levels regardless of bonus points earned"
-    // "Max potential" is defined in TIERS.
-    const maxPotential = tier.maxBonus;
-
+    // 4. Calculate Final Start
     const calculatedStart = baseStart + bonusToApply;
-    return Math.min(calculatedStart, maxPotential);
+
+    // 5. Hard Cap
+    return Math.min(calculatedStart, maxPoints);
 }

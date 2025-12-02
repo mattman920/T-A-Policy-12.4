@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../utils/supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
-import { calculateCurrentPoints, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES } from '../utils/pointCalculator';
+import { calculateCurrentPoints, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
+import { useAuth } from '../contexts/AuthContext';
 
 export function useData() {
+    const { organizationId } = useAuth();
     const [data, setData] = useState({
         employees: [],
         violations: [],
@@ -14,7 +16,8 @@ export function useData() {
             startingPoints: 25,
             violationPenalties: {
                 tardy: DEFAULT_TARDY_PENALTIES,
-                callout: DEFAULT_CALLOUT_PENALTIES
+                callout: DEFAULT_CALLOUT_PENALTIES,
+                positiveAdjustments: DEFAULT_POSITIVE_ADJUSTMENTS
             },
             reportUsage: {}
         }
@@ -47,7 +50,8 @@ export function useData() {
                 startingPoints: 25,
                 violationPenalties: {
                     tardy: DEFAULT_TARDY_PENALTIES,
-                    callout: DEFAULT_CALLOUT_PENALTIES
+                    callout: DEFAULT_CALLOUT_PENALTIES,
+                    positiveAdjustments: DEFAULT_POSITIVE_ADJUSTMENTS
                 },
                 reportUsage: {}
             };
@@ -69,6 +73,7 @@ export function useData() {
                 name: e.name,
                 startDate: e.start_date,
                 active: e.active,
+                archived: !e.active, // Map active=false to archived=true
                 currentPoints: e.current_points,
                 tier: e.tier
             }));
@@ -88,17 +93,7 @@ export function useData() {
             setData({
                 employees: mappedEmployees,
                 violations: mappedViolations,
-                quarters: [], // Not persisting quarters logic yet? Original code had it but didn't seem to save it explicitly in add/remove? 
-                // Original code: const [data, setData] = useState({ employees: [], violations: [], quarters: [] });
-                // And loadData loaded it. But where did it come from? 
-                // Looking at original code: `const loadedData = await Storage.loadData();`
-                // It seems quarters might be derived or just stored. 
-                // I will ignore quarters persistence for now as it wasn't in my schema plan and might be derived.
-                // Wait, if it's derived, I should derive it. If it's stored, I missed it.
-                // Let's check if `quarters` is used. 
-                // In original code: `quarters: importedData.quarters || [],` in import.
-                // But `addViolation` etc don't update quarters.
-                // I'll leave it as empty array for now or derived if I see logic.
+                quarters: [],
                 issuedDAs,
                 settings: mergedSettings
             });
@@ -129,6 +124,7 @@ export function useData() {
         const newEmployee = {
             id: uuidv4(),
             user_id: user.id,
+            organization_id: organizationId,
             name,
             start_date: startDate,
             active: true,
@@ -144,6 +140,7 @@ export function useData() {
                 name: newEmployee.name,
                 startDate: newEmployee.start_date,
                 active: newEmployee.active,
+                archived: !newEmployee.active,
                 currentPoints: newEmployee.current_points,
                 tier: newEmployee.tier
             };
@@ -160,6 +157,7 @@ export function useData() {
         const newViolation = {
             id: uuidv4(),
             user_id: user.id,
+            organization_id: organizationId,
             employee_id: employeeId,
             type,
             date,
@@ -295,7 +293,7 @@ export function useData() {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
-            const { error } = await supabase.from('issued_das').insert([{ da_key: daKey, user_id: user.id }]);
+            const { error } = await supabase.from('issued_das').insert([{ da_key: daKey, user_id: user.id, organization_id: organizationId }]);
             if (!error) {
                 setData(prev => ({ ...prev, issuedDAs: [...prev.issuedDAs, daKey] }));
             }
@@ -380,14 +378,14 @@ export function useData() {
 
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-            const { data: existing } = await supabase.from('settings').select('id').eq('user_id', user.id).single();
+            const { data: existing } = await supabase.from('settings').select('id').eq('organization_id', organizationId).single();
 
             let error;
             if (existing) {
                 const { error: updateError } = await supabase.from('settings').update(dbSettings).eq('id', existing.id);
                 error = updateError;
             } else {
-                const { error: insertError } = await supabase.from('settings').insert([{ ...dbSettings, user_id: user.id }]);
+                const { error: insertError } = await supabase.from('settings').insert([{ ...dbSettings, user_id: user.id, organization_id: organizationId }]);
                 error = insertError;
             }
 
@@ -398,11 +396,17 @@ export function useData() {
     };
 
     const updateEmployee = async (updatedEmployee) => {
+        // Handle archive logic: if updatedEmployee has archived property, map it to active
+        let active = updatedEmployee.active;
+        if (updatedEmployee.archived !== undefined) {
+            active = !updatedEmployee.archived;
+        }
+
         const dbEmployee = {
             id: updatedEmployee.id,
             name: updatedEmployee.name,
             start_date: updatedEmployee.startDate,
-            active: updatedEmployee.active,
+            active: active,
             current_points: updatedEmployee.currentPoints,
             tier: updatedEmployee.tier
         };
@@ -412,7 +416,7 @@ export function useData() {
         if (!error) {
             setData(prev => ({
                 ...prev,
-                employees: prev.employees.map(emp => emp.id === updatedEmployee.id ? updatedEmployee : emp)
+                employees: prev.employees.map(emp => emp.id === updatedEmployee.id ? { ...updatedEmployee, active } : emp)
             }));
         }
     };

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useData } from '../hooks/useData';
-import { calculateDeductions, calculateCurrentPoints, STARTING_POINTS } from '../utils/pointCalculator';
-import { AlertTriangle, CheckCircle, User, Calendar, Clock, Edit2, ArrowLeft, Save, X, Trash2 } from 'lucide-react';
+import { calculateDeductions, calculateCurrentPoints, STARTING_POINTS, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { AlertTriangle, CheckCircle, User, Calendar, Clock, Edit2, ArrowLeft, Save, X, Trash2, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
 
@@ -28,16 +28,16 @@ const LogViolation = () => {
     const violations = data?.violations || [];
 
     // --- Log Mode Logic ---
-    const getPointsToDeduct = () => {
+    const getPointImpact = () => {
         if (!selectedEmployeeId) return 0;
 
         const empViolations = violations.filter(v => v.employeeId === selectedEmployeeId);
-        const currentDeductions = calculateDeductions(empViolations, data.settings.violationPenalties);
+        const currentPoints = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
 
         const newViolation = { type: violationType, date: violationDate };
-        const newDeductions = calculateDeductions([...empViolations, newViolation], data.settings.violationPenalties);
+        const newPoints = calculateCurrentPoints(data.settings.startingPoints, [...empViolations, newViolation], data.settings.violationPenalties);
 
-        return newDeductions - currentDeductions;
+        return newPoints - currentPoints;
     };
 
     const getCurrentPoints = () => {
@@ -55,10 +55,11 @@ const LogViolation = () => {
         }
 
         setIsSubmitting(true);
-        const pointsDeducted = getPointsToDeduct();
+        const impact = getPointImpact();
+        const pointsToLog = Math.abs(impact);
 
         try {
-            await addViolation(selectedEmployeeId, violationType, violationDate, pointsDeducted, violationShift);
+            await addViolation(selectedEmployeeId, violationType, violationDate, pointsToLog, violationShift);
 
             // Reset form
             setSelectedEmployeeId('');
@@ -75,9 +76,9 @@ const LogViolation = () => {
     };
 
     const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
-    const pointsToDeduct = getPointsToDeduct();
+    const pointImpact = getPointImpact();
     const currentPoints = getCurrentPoints();
-    const newPoints = currentPoints - pointsToDeduct;
+    const newPoints = currentPoints + pointImpact;
 
     // --- Edit Mode Logic ---
     const [filterMode, setFilterMode] = useState('all'); // 'all', 'quarter', 'week'
@@ -282,6 +283,8 @@ const LogViolation = () => {
                                     <option value="Tardy (12-29 min)">Tardy (12-29 min)</option>
                                     <option value="Tardy (30+ min)">Tardy (30+ min)</option>
                                     <option value="Callout">Callout</option>
+                                    <option value="Early Arrival">Early Arrival</option>
+                                    <option value="Shift Pickup">Shift Pickup</option>
                                 </select>
                             </div>
 
@@ -383,8 +386,12 @@ const LogViolation = () => {
                                         borderRadius: 'var(--radius-md)',
                                         textAlign: 'center'
                                     }}>
-                                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Deduction</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--accent-danger)' }}>-{pointsToDeduct}</p>
+                                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                                            {pointImpact >= 0 ? 'Points Added' : 'Deduction'}
+                                        </p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: '700', color: pointImpact >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
+                                            {pointImpact >= 0 ? `+${pointImpact}` : pointImpact}
+                                        </p>
                                     </div>
 
                                     <div style={{
@@ -537,15 +544,22 @@ const LogViolation = () => {
                                                     padding: '0.25rem 0.5rem',
                                                     borderRadius: '4px',
                                                     fontSize: '0.85rem',
-                                                    backgroundColor: v.type === 'Callout' ? 'var(--accent-danger-bg)' : 'var(--accent-warning-bg)',
-                                                    color: v.type === 'Callout' ? 'var(--accent-danger)' : 'var(--accent-warning)',
+                                                    backgroundColor: v.type === 'Callout' ? 'var(--accent-danger-bg)' :
+                                                        (v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? 'var(--accent-success-bg)' : 'var(--accent-warning-bg)',
+                                                    color: v.type === 'Callout' ? 'var(--accent-danger)' :
+                                                        (v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? 'var(--accent-success)' : 'var(--accent-warning)',
                                                     fontWeight: 500
                                                 }}>
                                                     {v.type}
                                                 </span>
                                             </td>
-                                            <td style={{ padding: '1rem', textAlign: 'center', fontWeight: 'bold', color: 'var(--accent-danger)' }}>
-                                                -{v.pointsDeducted}
+                                            <td style={{
+                                                padding: '1rem',
+                                                textAlign: 'center',
+                                                fontWeight: 'bold',
+                                                color: (v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? 'var(--accent-success)' : 'var(--accent-danger)'
+                                            }}>
+                                                {(v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? '+' : '-'}{v.pointsDeducted}
                                             </td>
                                             <td style={{ padding: '1rem', textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                                                 <button
