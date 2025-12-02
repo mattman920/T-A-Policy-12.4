@@ -8,7 +8,7 @@ const TerminationsReportModal = ({ isOpen, onClose, employees }) => {
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
-    const archivedEmployees = employees.filter(e => e.archived && e.archivedDate);
+    const archivedEmployees = employees.filter(e => e.archived);
 
     const filteredEmployees = archivedEmployees.filter(e => {
         if (!startDate && !endDate) return true;
@@ -35,7 +35,7 @@ const TerminationsReportModal = ({ isOpen, onClose, employees }) => {
         const tableColumn = ["Employee Name", "Termination Date", "Points at Termination"];
         const tableRows = filteredEmployees.map(emp => [
             emp.name,
-            new Date(emp.archivedDate).toLocaleDateString(),
+            emp.archivedDate ? new Date(emp.archivedDate).toLocaleDateString() : 'Unknown',
             emp.currentPoints || 'N/A'
         ]);
 
@@ -99,7 +99,7 @@ const TerminationsReportModal = ({ isOpen, onClose, employees }) => {
                                 filteredEmployees.map(emp => (
                                     <tr key={emp.id} style={{ borderTop: '1px solid var(--border-color)' }}>
                                         <td style={{ padding: '0.75rem', fontSize: '0.9rem' }}>{emp.name}</td>
-                                        <td style={{ padding: '0.75rem', fontSize: '0.9rem' }}>{new Date(emp.archivedDate).toLocaleDateString()}</td>
+                                        <td style={{ padding: '0.75rem', fontSize: '0.9rem' }}>{emp.archivedDate ? new Date(emp.archivedDate).toLocaleDateString() : 'Unknown'}</td>
                                     </tr>
                                 ))
                             ) : (

@@ -158,6 +158,35 @@ const Settings = () => {
                 </button>
             </section>
 
+            {/* Diagnostics Section */}
+            <section style={sectionStyle}>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <AlertCircle size={20} /> System Diagnostics
+                </h2>
+                <button
+                    onClick={() => import('../utils/testLogic').then(module => module.runTestsAndDownloadReport())}
+                    style={navButtonStyle}
+                    onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div style={{
+                            padding: '0.75rem',
+                            backgroundColor: 'var(--bg-secondary)',
+                            borderRadius: '50%',
+                            color: '#8b5cf6'
+                        }}>
+                            <Download size={24} />
+                        </div>
+                        <div>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Test Logic & Generate Report</h3>
+                            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Run comprehensive logic tests and download detailed PDF report</p>
+                        </div>
+                    </div>
+                    <ChevronRight size={20} color="var(--text-secondary)" />
+                </button>
+            </section>
+
             {/* Data Management Section */}
             <section style={sectionStyle}>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)' }}>

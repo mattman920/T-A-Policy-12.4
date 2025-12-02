@@ -7,14 +7,23 @@ import {
 
 const Projections = () => {
     const { data, loading } = useData();
+
+    if (loading) {
+        return (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+                <p>Loading Projections...</p>
+            </div>
+        );
+    }
+
     const allEmployees = data?.employees || [];
     const allViolations = data?.violations || [];
 
     // Filter out archived employees and their violations
     const employees = allEmployees.filter(e => !e.archived);
     const violations = allViolations.filter(v => {
-        const emp = allEmployees.find(e => e.id === v.employeeId);
-        return emp && !emp.archived;
+        // Only include violations for active employees
+        return employees.some(e => e.id === v.employeeId);
     });
 
     // --- Logic: Forecast & Trends ---

@@ -74,6 +74,7 @@ export function useData() {
                 startDate: e.start_date,
                 active: e.active,
                 archived: !e.active, // Map active=false to archived=true
+                archivedDate: e.archived_date,
                 currentPoints: e.current_points,
                 tier: e.tier
             }));
@@ -407,6 +408,7 @@ export function useData() {
             name: updatedEmployee.name,
             start_date: updatedEmployee.startDate,
             active: active,
+            archived_date: updatedEmployee.archivedDate,
             current_points: updatedEmployee.currentPoints,
             tier: updatedEmployee.tier
         };

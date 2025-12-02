@@ -15,6 +15,8 @@ export const VIOLATION_TYPES = {
     TARDY_12_29: 'Tardy (12-29 min)',
     TARDY_30_PLUS: 'Tardy (30+ min)',
     CALLOUT: 'Callout',
+    EARLY_ARRIVAL: 'Early Arrival',
+    SHIFT_PICKUP: 'Shift Pickup',
 };
 
 // Deduction Rules
@@ -51,6 +53,8 @@ export function calculateDeductions(violations, penalties = {}) {
     violations.forEach(v => {
         if (v.type === VIOLATION_TYPES.CALLOUT) {
             callouts.push(v);
+        } else if (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) {
+            // Skip positive adjustments in deduction calculation
         } else {
             // Parse date string (YYYY-MM-DD) as UTC to avoid timezone shifts
             const [year, month, day] = v.date.split('-').map(Number);
@@ -97,6 +101,25 @@ export function calculateDeductions(violations, penalties = {}) {
 }
 
 /**
+ * Calculates the total positive points added for a list of violations (adjustments).
+ * @param {Array} violations - List of violation objects
+ * @param {Object} penalties - Contains positiveAdjustments settings
+ * @returns {number} Total points added
+ */
+export function calculatePositiveAdjustments(violations, penalties = {}) {
+    let totalAdded = 0;
+    const adjustments = penalties.positiveAdjustments || DEFAULT_POSITIVE_ADJUSTMENTS;
+
+    violations.forEach(v => {
+        if (adjustments[v.type]) {
+            totalAdded += adjustments[v.type];
+        }
+    });
+
+    return totalAdded;
+}
+
+/**
  * Calculates the current point balance.
  * @param {number} startBalance - Points at start of quarter
  * @param {Array} violations - List of violations
@@ -107,7 +130,8 @@ export function calculateDeductions(violations, penalties = {}) {
  */
 export function calculateCurrentPoints(startBalance, violations, penalties = {}, bonusPoints = 0, maxPoints = 150) {
     const deductions = calculateDeductions(violations, penalties);
-    let points = startBalance - deductions + bonusPoints;
+    const positiveAdjustments = calculatePositiveAdjustments(violations, penalties);
+    let points = startBalance - deductions + positiveAdjustments + bonusPoints;
     return Math.min(points, maxPoints);
 }
 

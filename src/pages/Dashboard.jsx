@@ -19,7 +19,14 @@ const Dashboard = () => {
   const [filterType, setFilterType] = useState('all');
   const [isTerminationsModalOpen, setIsTerminationsModalOpen] = useState(false);
 
-  // Safe data access
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <p>Loading Dashboard...</p>
+      </div>
+    );
+  }
+
   // Safe data access
   const allEmployees = data?.employees || [];
   const allViolations = data?.violations || [];
@@ -27,8 +34,8 @@ const Dashboard = () => {
   // Filter out archived employees and their violations
   const employees = allEmployees.filter(e => !e.archived);
   const violations = allViolations.filter(v => {
-    const emp = allEmployees.find(e => e.id === v.employeeId);
-    return emp && !emp.archived;
+    // Only include violations for active employees
+    return employees.some(e => e.id === v.employeeId);
   });
 
   // --- Metrics Calculation ---

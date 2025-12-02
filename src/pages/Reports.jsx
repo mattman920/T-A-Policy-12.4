@@ -18,8 +18,8 @@ const Reports = () => {
     // Filter out archived employees and their violations
     const employees = allEmployees.filter(e => !e.archived);
     const violations = allViolations.filter(v => {
-        const emp = allEmployees.find(e => e.id === v.employeeId);
-        return emp && !emp.archived;
+        // Only include violations for active employees
+        return employees.some(e => e.id === v.employeeId);
     });
 
     // --- Data Processing ---
@@ -177,7 +177,7 @@ const Reports = () => {
                                 style={selectStyle}
                             >
                                 <option value="all">All Employees</option>
-                                {data.employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                             </select>
                             <select
                                 value={filterType}
