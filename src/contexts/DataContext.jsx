@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
 import { supabase } from '../utils/supabaseClient';
 import { v4 as uuidv4 } from 'uuid';
 import { calculateCurrentPoints, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from './AuthContext';
 
-export function useData() {
+const DataContext = createContext();
+
+export function DataProvider({ children }) {
     const { organizationId, session } = useAuth();
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const isOfflineMode = isLocal && !session;
@@ -31,22 +33,50 @@ export function useData() {
         setLoading(true);
         try {
             if (isOfflineMode) {
-                setData({
-                    employees: [],
-                    violations: [],
-                    quarters: [],
-                    issuedDAs: [],
-                    settings: {
-                        companyName: 'Attendance (Local)',
-                        startingPoints: 25,
-                        violationPenalties: {
-                            tardy: DEFAULT_TARDY_PENALTIES,
-                            callout: DEFAULT_CALLOUT_PENALTIES,
-                            positiveAdjustments: DEFAULT_POSITIVE_ADJUSTMENTS
-                        },
-                        reportUsage: {}
-                    }
-                });
+                // If we already have data in memory (from previous load or updates), don't reset it to empty!
+                // This is the key fix for persistence.
+                // However, on first load (refresh), it will be empty.
+                // If we want it to persist across refreshes, we'd need localStorage.
+                // But the user said "when I switch tabs... data resets". This implies component unmounting reset state.
+                // By moving state to Context, it will persist as long as the App is mounted (which it is, unless page refresh).
+
+                // Only initialize if empty? No, we want to start fresh on refresh, but persist during session.
+                // The state in Context persists as long as the Provider is mounted.
+                // So we just need to initialize once.
+
+                // Actually, if we are in offline mode, we might want to check if we have data already?
+                // But `load` is called on mount.
+                // If we want to persist across *page refreshes*, we need localStorage.
+                // The user said "when I close the tab... data resets but while im testing I want data to remain".
+                // So just Context is enough for "switching tabs" (if they meant browser tabs, then the app is still running in one tab).
+                // Wait, "switch tabs to test something" usually means navigating within the app (client-side routing).
+                // If they meant browser tabs, then each tab is a separate instance.
+                // If they meant "Tabs" in the UI (e.g. Dashboard -> Employees), then Context fixes it.
+
+                // Let's assume they meant navigating within the app.
+                // We should only set default empty data if we haven't initialized yet?
+                // Or just don't re-set it if it's already populated?
+                // But `data` is state.
+
+                // Let's just set it to default structure if it's "empty" or just return if we want to keep current state?
+                // But `load` is usually called to *refresh* data.
+                // In offline mode, "refresh" might mean "reset" or "do nothing".
+                // Let's make it do nothing if we already have data, OR just set defaults if it's the very first load.
+                // But `data` is initialized with defaults in `useState`.
+                // So we can just stop loading.
+
+                // Wait, the `useState` initial value above has empty arrays.
+                // So we should set the *structure* with defaults if needed.
+
+                if (data.employees.length === 0 && data.settings.companyName === 'Attendance') {
+                    setData(prev => ({
+                        ...prev,
+                        settings: {
+                            ...prev.settings,
+                            companyName: 'Attendance (Local)',
+                        }
+                    }));
+                }
                 setLoading(false);
                 return;
             }
@@ -57,18 +87,11 @@ export function useData() {
             const { data: violations, error: vioError } = await supabase.from('violations').select('*');
             if (vioError) throw vioError;
 
-            const { data: settingsArray, error: setError } = await supabase.from('settings').select('*').limit(1);
-            const settingsData = settingsArray?.[0] || null;
-            // If no settings, we might need to handle that, but setup script should have created them.
-            // If error is PGRST116 (no rows), use defaults.
-
+            const { data: settingsData, error: setError } = await supabase.from('settings').select('*').single();
             const { data: issuedDasData, error: daError } = await supabase.from('issued_das').select('da_key');
             if (daError) throw daError;
 
             const loadedSettings = settingsData || {};
-
-            // Parse JSON fields if they come back as strings (Supabase client usually handles JSONB automatically as objects, but let's be safe)
-            // Actually supabase-js returns JSONB as objects.
 
             const defaultSettings = {
                 companyName: 'Attendance',
@@ -84,27 +107,23 @@ export function useData() {
             const mergedSettings = {
                 ...defaultSettings,
                 ...loadedSettings,
-                // Map snake_case to camelCase if needed, or just use snake_case in DB and map here.
-                // Let's map DB snake_case to app camelCase
                 companyName: loadedSettings.company_name || defaultSettings.companyName,
                 startingPoints: loadedSettings.starting_points !== undefined ? loadedSettings.starting_points : defaultSettings.startingPoints,
                 violationPenalties: loadedSettings.violation_penalties || defaultSettings.violationPenalties,
                 reportUsage: loadedSettings.report_usage || defaultSettings.reportUsage
             };
 
-            // Map employees snake_case to camelCase
             const mappedEmployees = (employees || []).map(e => ({
                 id: e.id,
                 name: e.name,
                 startDate: e.start_date,
                 active: e.active,
-                archived: !e.active, // Map active=false to archived=true
+                archived: !e.active,
                 archivedDate: e.archived_date,
                 currentPoints: e.current_points,
                 tier: e.tier
             }));
 
-            // Map violations
             const mappedViolations = (violations || []).map(v => ({
                 id: v.id,
                 employeeId: v.employee_id,
@@ -129,16 +148,11 @@ export function useData() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [isOfflineMode]); // Removed 'data' dependency to avoid infinite loop if we checked data inside
 
     useEffect(() => {
         load();
     }, [load]);
-
-    // Helper to refresh data (simpler than manual state updates for everything, but manual updates are better for UX)
-    // I will try to maintain local state updates for optimistic UI or just fast feedback, 
-    // but also trigger background refresh or just trust the local update.
-    // For now, I will replicate the local update logic AND write to Supabase.
 
     const addEmployee = async (name, startDate) => {
         let userId = 'local-user';
@@ -203,7 +217,6 @@ export function useData() {
             points_deducted: pointsDeducted
         };
 
-        // 1. Insert violation
         if (!isOfflineMode) {
             const { error: vioError } = await supabase.from('violations').insert([newViolation]);
             if (vioError) {
@@ -212,14 +225,8 @@ export function useData() {
             }
         }
 
-        // 2. Recalculate points
-        // We need to fetch all violations for this employee to be safe, or use local state.
-        // Using local state is faster.
         const employee = data.employees.find(e => e.id === employeeId);
         if (employee) {
-            // Map local violations back to calculation format if needed? 
-            // The pointCalculator likely expects objects with `pointsDeducted` etc.
-            // My local `data.violations` has camelCase keys.
             const allViolationsForEmployee = [...data.violations.filter(v => v.employeeId === employeeId), {
                 id: newViolation.id,
                 employeeId: newViolation.employee_id,
@@ -231,7 +238,6 @@ export function useData() {
 
             const currentPoints = calculateCurrentPoints(data.settings.startingPoints, allViolationsForEmployee, data.settings.violationPenalties);
 
-            // 3. Update employee in DB
             let empError = null;
             if (!isOfflineMode) {
                 const { error } = await supabase.from('employees').update({ current_points: currentPoints }).eq('id', employeeId);
@@ -239,7 +245,6 @@ export function useData() {
             }
 
             if (!empError) {
-                // Update local state
                 const updatedEmployees = data.employees.map(e =>
                     e.id === employeeId ? { ...e, currentPoints } : e
                 );
@@ -262,7 +267,6 @@ export function useData() {
     };
 
     const updateViolation = async (updatedViolation) => {
-        // updatedViolation comes in with camelCase keys from the app
         const dbViolation = {
             id: updatedViolation.id,
             employee_id: updatedViolation.employeeId,
@@ -281,16 +285,12 @@ export function useData() {
         }
 
         const employeeId = updatedViolation.employeeId;
-
-        // Recalculate points
-        // Update local list first to calculate
         const updatedViolations = data.violations.map(v =>
             v.id === updatedViolation.id ? updatedViolation : v
         );
         const allViolationsForEmployee = updatedViolations.filter(v => v.employeeId === employeeId);
         const currentPoints = calculateCurrentPoints(data.settings.startingPoints, allViolationsForEmployee, data.settings.violationPenalties);
 
-        // Update employee in DB
         let empError = null;
         if (!isOfflineMode) {
             const { error } = await supabase.from('employees').update({ current_points: currentPoints }).eq('id', employeeId);
@@ -360,48 +360,6 @@ export function useData() {
         }
     };
 
-    const exportDatabase = () => {
-        // Export current state
-        if (!data) return;
-        import('../utils/backup').then(({ exportData }) => {
-            exportData(data);
-        });
-    };
-
-    const importDatabase = async (file) => {
-        // Import is tricky with Supabase. 
-        // We probably want to parse the file and then bulk insert into Supabase?
-        // Or just warn user that import overwrites?
-        // For now, let's implement a basic version that tries to insert employees and violations.
-        // This might be slow for large datasets.
-
-        try {
-            const { importData } = await import('../utils/backup');
-            const importedData = await importData(file);
-
-            // This is a destructive operation usually? Or merge?
-            // Original code: `await saveData(validData);` which overwrites everything.
-            // So we should probably clear tables and insert new? Or just insert new?
-            // Clearing tables is risky.
-            // Let's just try to insert employees and violations that don't exist?
-            // Or maybe just alert that import is not fully supported yet?
-            // User asked to "change the code... to use supabase database".
-            // I will implement a "clear and replace" or "merge" strategy.
-            // Given the complexity, I'll implement a simple "merge/add" strategy for now.
-
-            // Actually, let's just log it for now or implement if easy.
-            // I'll skip complex import logic for this step to minimize risk, 
-            // but I should probably support it if I can.
-            // Let's just do nothing for import for now or throw error "Not supported in Supabase mode yet".
-            console.warn("Import not fully implemented for Supabase backend yet.");
-            return { success: false, error: "Import not supported yet" };
-
-        } catch (error) {
-            console.error("Import failed:", error);
-            return { success: false, error: error.message };
-        }
-    };
-
     const updateSettings = async (newSettings) => {
         const mergedSettings = { ...data.settings, ...newSettings };
 
@@ -464,7 +422,6 @@ export function useData() {
     };
 
     const updateEmployee = async (updatedEmployee) => {
-        // Handle archive logic: if updatedEmployee has archived property, map it to active
         let active = updatedEmployee.active;
         if (updatedEmployee.archived !== undefined) {
             active = !updatedEmployee.archived;
@@ -498,10 +455,8 @@ export function useData() {
         const now = new Date().toISOString();
         const currentUsage = data.settings.reportUsage || {};
         const reportLog = currentUsage[reportId] || [];
-
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
         const newReportLog = [...reportLog, now].filter(dateStr => new Date(dateStr) > sevenDaysAgo);
 
         const newSettings = {
@@ -511,11 +466,22 @@ export function useData() {
                 [reportId]: newReportLog
             }
         };
-
         await updateSettings(newSettings);
     };
 
-    return {
+    const exportDatabase = () => {
+        if (!data) return;
+        import('../utils/backup').then(({ exportData }) => {
+            exportData(data);
+        });
+    };
+
+    const importDatabase = async (file) => {
+        console.warn("Import not fully implemented for Supabase backend yet.");
+        return { success: false, error: "Import not supported yet" };
+    };
+
+    const value = {
         data,
         loading,
         addEmployee,
@@ -530,4 +496,14 @@ export function useData() {
         updateEmployee,
         logReportUsage
     };
+
+    return (
+        <DataContext.Provider value={value}>
+            {children}
+        </DataContext.Provider>
+    );
+}
+
+export function useData() {
+    return useContext(DataContext);
 }

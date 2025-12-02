@@ -39,7 +39,9 @@ export function AuthProvider({ children }) {
                 .from('organization_members')
                 .select('organization_id')
                 .eq('user_id', userId)
-                .single();
+                .limit(1);
+
+            const orgData = data?.[0];
 
             if (error) {
                 // If no organization found, it might be a new user or migration hasn't run.
@@ -47,8 +49,8 @@ export function AuthProvider({ children }) {
                 console.error('Error fetching organization:', error);
             }
 
-            if (data) {
-                setOrganizationId(data.organization_id);
+            if (orgData) {
+                setOrganizationId(orgData.organization_id);
             }
         } catch (error) {
             console.error('Error fetching organization:', error);

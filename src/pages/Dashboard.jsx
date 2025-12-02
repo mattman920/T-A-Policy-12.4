@@ -19,13 +19,7 @@ const Dashboard = () => {
   const [filterType, setFilterType] = useState('all');
   const [isTerminationsModalOpen, setIsTerminationsModalOpen] = useState(false);
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <p>Loading Dashboard...</p>
-      </div>
-    );
-  }
+
 
   // Safe data access
   const allEmployees = data?.employees || [];
@@ -141,6 +135,14 @@ const Dashboard = () => {
       default: return '#8884d8';
     }
   };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <p>Loading Dashboard...</p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto' }}>

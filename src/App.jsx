@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { DataProvider } from './contexts/DataContext';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Employees from './pages/Employees';
@@ -22,28 +23,48 @@ function App() {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>Loading...</div>;
   }
 
-  if (!session) {
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+  if (!session && !isLocal) {
     return <Login />;
   }
 
   return (
     <ThemeProvider>
-      <HashRouter>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="employees" element={<Employees />} />
-            <Route path="reports" element={<ReportsGenerator />} />
-            <Route path="projections" element={<Projections />} />
-            <Route path="da-issuance" element={<DAIssuance />} />
-            <Route path="log-violation" element={<LogViolation />} />
-            <Route path="scorecard" element={<Scorecard />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="settings/general" element={<GeneralConfiguration />} />
-            <Route path="settings/violations" element={<ViolationPenalties />} />
-          </Route>
-        </Routes>
-      </HashRouter>
+      {isLocal && !session && (
+        <div style={{
+          backgroundColor: '#f59e0b',
+          color: '#000',
+          textAlign: 'center',
+          padding: '0.5rem',
+          fontWeight: 'bold',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 9999
+        }}>
+          ⚠️ Local Dev Mode: Login Bypassed (Read-Only/Limited Access)
+        </div>
+      )}
+      <DataProvider>
+        <HashRouter>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="employees" element={<Employees />} />
+              <Route path="reports" element={<ReportsGenerator />} />
+              <Route path="projections" element={<Projections />} />
+              <Route path="da-issuance" element={<DAIssuance />} />
+              <Route path="log-violation" element={<LogViolation />} />
+              <Route path="scorecard" element={<Scorecard />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="settings/general" element={<GeneralConfiguration />} />
+              <Route path="settings/violations" element={<ViolationPenalties />} />
+            </Route>
+          </Routes>
+        </HashRouter>
+      </DataProvider>
     </ThemeProvider>
   );
 }

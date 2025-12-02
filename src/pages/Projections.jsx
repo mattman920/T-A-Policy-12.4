@@ -8,13 +8,7 @@ import {
 const Projections = () => {
     const { data, loading } = useData();
 
-    if (loading) {
-        return (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <p>Loading Projections...</p>
-            </div>
-        );
-    }
+
 
     const allEmployees = data?.employees || [];
     const allViolations = data?.violations || [];
@@ -207,7 +201,13 @@ const Projections = () => {
     }, [dayRiskData, forecastData, typeData]);
 
 
-    if (loading) return <div>Loading...</div>;
+    if (loading) {
+        return (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+                <p>Loading Projections...</p>
+            </div>
+        );
+    }
 
     return (
         <div style={{ paddingBottom: '2rem' }}>
