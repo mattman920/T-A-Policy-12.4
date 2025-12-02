@@ -489,9 +489,12 @@ export function useData() {
         if (!error) {
             setData(prev => ({
                 ...prev,
-                employees: prev.employees.map(emp => emp.id === updatedEmployee.id ? { ...updatedEmployee, active } : emp)
+                employees: prev.employees.map(emp => emp.id === updatedEmployee.id ? { ...updatedEmployee, active, archived: !active } : emp)
             }));
+        } else {
+            console.error("Error updating employee:", error);
         }
+        return { error };
     };
 
     const logReportUsage = async (reportId) => {
@@ -515,6 +518,47 @@ export function useData() {
         await updateSettings(newSettings);
     };
 
+    const deleteEmployee = async (employeeId) => {
+        if (!isOfflineMode) {
+            // 1. Delete violations
+            const { error: vioError } = await supabase.from('violations').delete().eq('employee_id', employeeId);
+            if (vioError) {
+                console.error("Error deleting employee violations:", vioError);
+                return { error: vioError };
+            }
+
+            // 2. Delete issued DAs
+            // We need to find DAs that start with the employeeId. 
+            // The key format is `${emp.id}-${tier.name}`.
+            // Supabase 'like' filter can be used.
+            const { error: daError } = await supabase.from('issued_das').delete().like('da_key', `${employeeId}-%`);
+            if (daError) {
+                console.error("Error deleting employee DAs:", daError);
+                // We might want to continue even if this fails, or stop? 
+                // Let's log and continue to try to delete the employee, 
+                // but ideally this should be a transaction or we should be careful.
+            }
+
+            // 3. Delete employee
+            const { error: empError } = await supabase.from('employees').delete().eq('id', employeeId);
+            if (empError) {
+                console.error("Error deleting employee:", empError);
+                return { error: empError };
+            }
+        }
+
+        // Update local state
+        setData(prev => ({
+            ...prev,
+            employees: prev.employees.filter(e => e.id !== employeeId),
+            violations: prev.violations.filter(v => v.employeeId !== employeeId),
+            // We also need to filter issuedDAs in local state
+            issuedDAs: prev.issuedDAs.filter(key => !key.startsWith(`${employeeId}-`))
+        }));
+
+        return { error: null };
+    };
+
     return {
         data,
         loading,
@@ -522,6 +566,7 @@ export function useData() {
         addViolation,
         updateViolation,
         deleteViolation,
+        deleteEmployee,
         reload: load,
         exportDatabase,
         importDatabase,

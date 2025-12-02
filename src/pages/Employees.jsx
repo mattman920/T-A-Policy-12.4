@@ -2,11 +2,11 @@ import React, { useState, useRef } from 'react';
 import { useData } from '../hooks/useData';
 import Modal from '../components/Modal';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, calculateDeductions } from '../utils/pointCalculator';
-import { Search, Upload, Archive, UserPlus, FileText, Filter } from 'lucide-react';
+import { Search, Upload, Archive, UserPlus, FileText, Filter, Trash2 } from 'lucide-react';
 import Papa from 'papaparse';
 
 const Employees = () => {
-    const { data, loading, addEmployee, addViolation, updateEmployee } = useData();
+    const { data, loading, addEmployee, addViolation, updateEmployee, deleteEmployee } = useData();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
     const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -83,7 +83,19 @@ const Employees = () => {
                 archived: !employee.archived,
                 archivedDate: !employee.archived ? new Date().toISOString() : null
             };
-            await updateEmployee(updatedEmployee);
+            const { error } = await updateEmployee(updatedEmployee);
+            if (error) {
+                alert(`Failed to update employee: ${error.message}`);
+            }
+        }
+    };
+
+    const handleDeleteEmployee = async (employee) => {
+        if (confirm(`Are you sure you want to PERMANENTLY DELETE ${employee.name}? This action cannot be undone and will remove all their data.`)) {
+            const { error } = await deleteEmployee(employee.id);
+            if (error) {
+                alert(`Failed to delete employee: ${error.message}`);
+            }
         }
     };
 
@@ -268,6 +280,22 @@ const Employees = () => {
                                 >
                                     <Archive size={18} />
                                 </button>
+                                {employee.archived && (
+                                    <button
+                                        onClick={() => handleDeleteEmployee(employee)}
+                                        title="Permanently Delete"
+                                        style={{
+                                            padding: '0.5rem',
+                                            borderRadius: 'var(--radius-md)',
+                                            border: '1px solid var(--accent-danger)',
+                                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                            color: 'var(--accent-danger)',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                )}
                             </div>
                         </div>
                     );

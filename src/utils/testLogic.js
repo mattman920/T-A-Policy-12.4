@@ -1,5 +1,5 @@
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
     STARTING_POINTS,
     TIERS,
@@ -153,7 +153,7 @@ export const runTestsAndDownloadReport = () => {
     doc.text(`Failed: ${failedCount}`, 80, 53);
 
     // Configuration Table
-    doc.autoTable({
+    autoTable(doc, {
         startY: 70,
         head: [['Configuration Key', 'Value']],
         body: [
@@ -171,7 +171,7 @@ export const runTestsAndDownloadReport = () => {
     });
 
     // Results Table
-    doc.autoTable({
+    autoTable(doc, {
         startY: doc.lastAutoTable.finalY + 15,
         head: [['Category', 'Test Name', 'Expected', 'Actual', 'Status', 'Details']],
         body: results.map(r => [

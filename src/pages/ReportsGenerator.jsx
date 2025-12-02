@@ -38,11 +38,16 @@ const ReportsGenerator = () => {
     const allViolations = data?.violations || [];
 
     // Filter out archived employees and their violations
-    const employees = allEmployees.filter(e => !e.archived);
-    const violations = allViolations.filter(v => {
-        // Only include violations for active employees
-        return employees.some(e => e.id === v.employeeId);
-    });
+    const employees = React.useMemo(() => {
+        return allEmployees.filter(e => !e.archived);
+    }, [allEmployees]);
+
+    const violations = React.useMemo(() => {
+        return allViolations.filter(v => {
+            // Only include violations for active employees
+            return employees.some(e => e.id === v.employeeId);
+        });
+    }, [allViolations, employees]);
     const [selectedReportId, setSelectedReportId] = useState(null);
     const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
     const [searchQuery, setSearchQuery] = useState('');

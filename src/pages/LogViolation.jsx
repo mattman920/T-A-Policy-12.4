@@ -624,6 +624,8 @@ const LogViolation = () => {
                                 <option value="Tardy (12-29 min)">Tardy (12-29 min)</option>
                                 <option value="Tardy (30+ min)">Tardy (30+ min)</option>
                                 <option value="Callout">Callout</option>
+                                <option value="Early Arrival">Early Arrival</option>
+                                <option value="Shift Pickup">Shift Pickup</option>
                             </select>
                         </div>
                         <div>
