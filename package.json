@@ -15,6 +15,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fireproof/core": "^0.24.0",
+    "@fireproof/netlify": "^0.19.118",
+    "@fireproof/react": "^0.10.20",
+    "@netlify/blobs": "^10.4.2",
     "@supabase/supabase-js": "^2.85.0",
     "jspdf": "^3.0.4",
     "jspdf-autotable": "^5.0.2",

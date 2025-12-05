@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';
 
-const TierBreakdown = ({ employees, violations, startingPoints }) => {
+const TierBreakdown = ({ employees, violations, startingPoints, daSettings }) => {
     const tierCounts = useMemo(() => {
         const counts = {
             [TIERS.GOOD.name]: 0,
+            [TIERS.EDUCATIONAL.name]: 0,
             [TIERS.COACHING.name]: 0,
             [TIERS.SEVERE.name]: 0,
             [TIERS.FINAL.name]: 0
@@ -15,7 +16,7 @@ const TierBreakdown = ({ employees, violations, startingPoints }) => {
 
             const empViolations = violations.filter(v => v.employeeId === emp.id);
             const points = calculateCurrentPoints(startingPoints, empViolations);
-            const tier = determineTier(points);
+            const tier = determineTier(points, daSettings);
 
             if (counts[tier.name] !== undefined) {
                 counts[tier.name]++;

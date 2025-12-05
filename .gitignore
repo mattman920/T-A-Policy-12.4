@@ -30,3 +30,6 @@ Thumbs.db
 
 # Electron-builder output
 release
+
+# Local Netlify folder
+.netlify

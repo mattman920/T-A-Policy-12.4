@@ -1,0 +1,63 @@
+# Quarterly Rollover Logic Explanation Prompt
+
+You are an AI agent tasked with implementing or understanding the quarterly point rollover logic for the Time and Attendance Tracker application. Here is a detailed explanation of how the system calculates the starting point balance for a new quarter.
+
+## Core Concept: Recursive Calculation
+
+The application does NOT store the starting balance for each quarter in the database. Instead, it calculates it dynamically on-the-fly using a recursive function called `calculateQuarterlyStart`.
+
+**Function Signature:** `calculateQuarterlyStart(targetQuarterKey, allViolations, settings)`
+
+**Inputs:**
+*   `targetQuarterKey`: String (e.g., "2024-Q2").
+*   `allViolations`: Array of all violation records for the employee.
+*   `settings`: Configuration object containing DA thresholds and penalties.
+
+## The Algorithm
+
+To determine the starting points for Quarter X, the system follows these steps:
+
+1.  **Check for Manual Purge:**
+    *   If `settings.quarterlyPurges[targetQuarterKey]` is true, return `maxPoints` (usually 150). This is a manual override.
+
+2.  **Base Case (No History):**
+    *   If the employee has no violations prior to the target quarter, return `maxPoints` (150).
+
+3.  **Recursive Step (Look Back):**
+    *   Calculate the starting balance of the **Previous Quarter** (recursively calling `calculateQuarterlyStart`).
+    *   Calculate the **End Score** of the Previous Quarter by applying all violations that occurred within that quarter's date range.
+    *   Determine the **Ending Tier** (Good Standing, Educational, Coaching, Severe, Final) based on that End Score.
+
+4.  **Determine "Next Start" (The Penalty):**
+    *   Based on the Ending Tier of the previous quarter, a provisional starting balance is assigned for the new quarter:
+        *   **Final** -> Starts at **Severe Threshold** (75 points)
+        *   **Severe** -> Starts at **Coaching Threshold** (100 points)
+        *   **Coaching** -> Starts at **Educational Threshold** (125 points)
+        *   **Educational / Good Standing** -> Resets to **Max Points** (150 points)
+
+5.  **The "Clean Slate" Rule (Recovery):**
+    *   This rule allows an employee to reset to 150 points if they have improved, even if the standard penalty would say otherwise.
+    *   **Condition:** The employee must NOT have dropped **2 or more tiers** during the previous quarter.
+    *   **Logic:**
+        *   Compare `StartTier` (tier at start of prev quarter) vs `EndTier` (tier at end of prev quarter).
+        *   Assign levels: Good=5, Educational=4, Coaching=3, Severe=2, Final=1.
+        *   If `(StartLevel - EndLevel) < 2`, the employee qualifies for a Clean Slate.
+        *   **Result:** Return `maxPoints` (150).
+    *   **Exception:** If the employee ended in `Termination` or failed the check, use the `Next Start` value calculated in step 4.
+
+## Key Takeaways for Implementation
+
+*   **Do not store static values:** Always calculate from the beginning of time (or the nearest "Clean Slate" / "Purge" event).
+*   **Dates matter:** Accurate date parsing is critical to place violations in the correct quarter.
+*   **Recursion is key:** You cannot know Q3's start without knowing Q2's end, which requires knowing Q2's start, and so on.
+
+## Example Scenario
+
+*   **Q1 Start:** 150 points (Good Standing).
+*   **Q1 Activity:** Employee loses 50 points, ending at 100 (Coaching).
+*   **Q1 Rollover Calculation:**
+    *   Ending Tier: Coaching.
+    *   Standard Penalty: Coaching -> Starts next quarter at Educational (125).
+    *   Clean Slate Check: Started Good (5), Ended Coaching (3). Drop = 2 levels.
+    *   **Result:** Clean Slate FAILED.
+*   **Q2 Start:** 125 points.

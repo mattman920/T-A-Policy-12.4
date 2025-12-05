@@ -12,40 +12,10 @@ import LogViolation from './pages/LogViolation';
 import Scorecard from './pages/Scorecard';
 import GeneralConfiguration from './pages/GeneralConfiguration';
 import ViolationPenalties from './pages/ViolationPenalties';
-import Login from './components/Login';
-import { useAuth } from './contexts/AuthContext';
-
+import DASettings from './pages/DASettings';
 function App() {
-  const { session, loading } = useAuth();
-
-  if (loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>Loading...</div>;
-  }
-
-  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-  if (!session && !isLocal) {
-    return <Login />;
-  }
-
   return (
     <ThemeProvider>
-      {isLocal && !session && (
-        <div style={{
-          backgroundColor: '#f59e0b',
-          color: '#000',
-          textAlign: 'center',
-          padding: '0.5rem',
-          fontWeight: 'bold',
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 9999
-        }}>
-          ⚠️ Local Dev Mode: Login Bypassed (Read-Only/Limited Access)
-        </div>
-      )}
       <HashRouter>
         <Routes>
           <Route path="/" element={<Layout />}>
@@ -59,6 +29,7 @@ function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="settings/general" element={<GeneralConfiguration />} />
             <Route path="settings/violations" element={<ViolationPenalties />} />
+            <Route path="settings/da" element={<DASettings />} />
           </Route>
         </Routes>
       </HashRouter>

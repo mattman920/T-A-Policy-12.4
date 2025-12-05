@@ -84,6 +84,39 @@ ipcMain.handle('save-pdf', async (event, options) => {
     }
 });
 
+// Save Multiple PDFs handler
+ipcMain.handle('save-multiple-pdfs', async (event, files) => {
+    const { dialog } = require('electron');
+    const win = BrowserWindow.fromWebContents(event.sender);
+
+    // 1. Select Directory
+    const result = await dialog.showOpenDialog(win, {
+        title: 'Select Folder to Save Reports',
+        properties: ['openDirectory']
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, canceled: true };
+    }
+
+    const outputDir = result.filePaths[0];
+    const results = [];
+
+    // 2. Write each file
+    for (const file of files) {
+        try {
+            const filePath = path.join(outputDir, file.fileName);
+            fs.writeFileSync(filePath, Buffer.from(file.pdfData, 'base64'));
+            results.push({ fileName: file.fileName, success: true });
+        } catch (error) {
+            console.error(`Error saving ${file.fileName}:`, error);
+            results.push({ fileName: file.fileName, success: false, error: error.message });
+        }
+    }
+
+    return { success: true, results, outputDir };
+});
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1200,
@@ -93,6 +126,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             sandbox: true, // Enable sandbox for extra security
+            plugins: true // Enable plugins for PDF viewer
         },
     });
 
@@ -102,7 +136,7 @@ function createWindow() {
             responseHeaders: {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
-                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;"
+                    "default-src 'self' blob:; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com https://unpkg.com; object-src 'self' blob:;"
                 ]
             }
         });

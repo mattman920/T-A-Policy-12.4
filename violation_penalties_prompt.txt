@@ -1,0 +1,48 @@
+You are building a 'Violation Penalties' configuration page within the Settings section of a Time and Attendance Tracker application.
+
+**Goal:** Create a React component (`ViolationPenalties.jsx`) that allows administrators to configure the point deductions associated with various employee violations (Tardiness, Callouts) and point additions for positive actions.
+
+**Context:**
+The application tracks employee attendance points. Points are deducted for violations and added for positive behaviors. These values need to be configurable, not hardcoded. The data is stored in a global `DataContext` under `data.settings.violationPenalties`.
+
+**Requirements:**
+
+1.  **Navigation & Layout:**
+    *   The page should be accessible via the route `/settings/violations`.
+    *   Include a header with the title "Violation Penalties".
+    *   Include a "Back" button (arrow icon) to return to the main Settings page (`/settings`).
+    *   Include a "Save Changes" button in the header to persist updates.
+
+2.  **Data Structure:**
+    *   The component should initialize its state from `data.settings.violationPenalties`.
+    *   If no settings exist, fall back to these defaults (imported from `pointCalculator.mjs`):
+        *   `tardy`: Object where keys are violation types (e.g., 'Tardy (1-5 min)') and values are arrays of 4 integers representing penalties for the 1st, 2nd, 3rd, and 4th+ occurrences.
+        *   `callout`: Array of 6 integers representing penalties for the 1st through 6th+ occurrences.
+        *   `positiveAdjustments`: Object where keys are types (e.g., 'Early Arrival') and values are integer points to add.
+
+3.  **UI Sections:**
+    *   **Tardiness (Points Deducted):**
+        *   Display a grid of inputs for each Tardy category (e.g., 1-5 min, 6-11 min, etc.).
+        *   For each category, show 4 input boxes labeled "1st", "2nd", "3rd", "4th+".
+        *   Inputs should be numeric.
+    *   **Callouts (Points Deducted):**
+        *   Display a row of 6 input boxes labeled "1st" through "6th+".
+        *   Inputs should be numeric.
+    *   **Positive Adjustments (Points Added):**
+        *   Display inputs for 'Early Arrival' and 'Shift Pickup'.
+        *   Inputs should be numeric and perhaps styled differently (e.g., green text) to indicate addition.
+
+4.  **Functionality:**
+    *   Users can edit any input field.
+    *   Clicking "Save Changes" should call `updateSettings` from `useData` to save the modified `violationPenalties` object to the global state.
+    *   Show a success alert/message upon saving.
+
+5.  **Styling:**
+    *   Use a clean, modern design consistent with the rest of the application.
+    *   Use CSS variables for colors (e.g., `var(--bg-secondary)`, `var(--text-primary)`) to support Dark/Light mode.
+    *   Use icons (e.g., `lucide-react`) for visual enhancement.
+
+**Technical Details:**
+*   Use `React.useState` for local form state.
+*   Use `React.useEffect` to sync with global data on load.
+*   Ensure inputs handle numeric conversion (parse string to int).

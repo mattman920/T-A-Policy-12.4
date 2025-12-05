@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useData } from '../contexts/DataContext';
-import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, STARTING_POINTS, TIERS, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { getQuarterKey } from '../utils/dateUtils';
 import {
     FileText, Printer, ChevronRight, Download, FileSpreadsheet, BarChart2, Search,
     Clock, AlertTriangle, Calendar, TrendingUp, ShieldAlert, UserCheck,
@@ -9,6 +10,8 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import EMDReportModal from '../components/EMDReportModal';
+import HealthCheckModal from '../components/HealthCheckModal';
 
 // Force update timestamp: 2025-11-25 23:05
 
@@ -31,7 +34,8 @@ const reports = [
     { id: 16, title: 'Team Bonus Eligibility', category: 'Analysis', desc: 'Percentage of team eligible for bonuses', icon: Users },
     { id: 17, title: 'QoQ Violation Comparison', category: 'Analysis', desc: 'Quarter over Quarter comparison', icon: BarChart2 },
     { id: 19, title: 'DA Distribution Analytics', category: 'Analysis', desc: 'Distribution of employees across tiers', icon: PieChart },
-    { id: 20, title: 'Positive Adjustments Report', category: 'Analysis', desc: 'Track early arrivals and shift pickups', icon: TrendingUp }
+    { id: 20, title: 'Positive Adjustments Report', category: 'Analysis', desc: 'Track early arrivals and shift pickups', icon: TrendingUp },
+    { id: 21, title: 'Starting Points', category: 'Individual', desc: 'Employee starting points and DA threshold per quarter', icon: TrendingUp }
 ];
 const ReportsGenerator = () => {
     const { data, loading, logReportUsage } = useData();
@@ -59,6 +63,8 @@ const ReportsGenerator = () => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [qoqQ1, setQoqQ1] = useState('Q3');
     const [qoqQ2, setQoqQ2] = useState('Q4');
+    const [isEMDModalOpen, setIsEMDModalOpen] = useState(false);
+    const [isHealthCheckModalOpen, setIsHealthCheckModalOpen] = useState(false);
 
     // Usage Tracking
     React.useEffect(() => {
@@ -114,7 +120,7 @@ const ReportsGenerator = () => {
                 return violations.filter(v => v.date === selectedDate).map(v => ({
                     'Date': v.date,
                     'Employee': employees.find(e => e.id === v.employeeId)?.name,
-                    'Type': v.type,
+                    'Type': v.type + (v.shiftCovered ? ' (Covered)' : ''),
                     'Shift': v.shift || 'AM',
                     'Points': v.pointsDeducted
                 }));
@@ -128,13 +134,14 @@ const ReportsGenerator = () => {
                 }));
             case 3: { // Monthly Callout Counter
                 const calloutCounts = {};
-                violations.filter(v => v.type === 'Callout' && new Date(v.date).getMonth() === parseInt(selectedMonth)).forEach(v => {
+                violations.filter(v => v.type === VIOLATION_TYPES.CALLOUT && (parseInt(v.date.split('-')[1]) - 1) === parseInt(selectedMonth)).forEach(v => {
                     calloutCounts[v.employeeId] = (calloutCounts[v.employeeId] || 0) + 1;
                 });
                 return Object.entries(calloutCounts).map(([id, count]) => ({
                     'Employee': employees.find(e => e.id === id)?.name || 'Unknown',
                     'Callouts': count,
-                    'Status': count > 2 ? 'High Risk' : 'Normal'
+                    'Status': count > 2 ? 'High Risk' : 'Normal',
+                    'Notes': violations.filter(v => v.employeeId === id && v.type === VIOLATION_TYPES.CALLOUT && v.shiftCovered && (parseInt(v.date.split('-')[1]) - 1) === parseInt(selectedMonth)).length > 0 ? 'Includes covered shifts' : ''
                 }));
             }
             case 4: { // Monthly Bonus Potential (Perfect Attendance)
@@ -146,7 +153,7 @@ const ReportsGenerator = () => {
                 }));
             }
             case 5: { // Shift-Based Trend Analysis
-                const monthViolations = violations.filter(v => new Date(v.date).getMonth() === parseInt(selectedMonth));
+                const monthViolations = violations.filter(v => (parseInt(v.date.split('-')[1]) - 1) === parseInt(selectedMonth));
                 const amViolations = monthViolations.filter(v => v.shift === 'AM').length;
                 const pmViolations = monthViolations.filter(v => v.shift === 'PM').length;
                 const total = monthViolations.length || 1;
@@ -161,8 +168,10 @@ const ReportsGenerator = () => {
                 const issuedDAs = data?.issuedDAs || [];
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
-                    const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, penalties);
-                    const tier = determineTier(points);
+                    const qKey = getQuarterKey();
+                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const points = calculateCurrentPoints(startPoints, empViolations, penalties);
+                    const tier = determineTier(points, data.settings.daSettings);
 
                     if (tier.name !== 'Good Standing') {
                         // Find date they crossed threshold (simplified: date of last violation that put them there)
@@ -187,8 +196,10 @@ const ReportsGenerator = () => {
             case 7: // Near-Threshold Warning
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
-                    const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, penalties);
-                    const tier = determineTier(points);
+                    const qKey = getQuarterKey();
+                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const points = calculateCurrentPoints(startPoints, empViolations, penalties);
+                    const tier = determineTier(points, data.settings.daSettings);
                     // "Within 17 points of the next tier" - implies dropping to a lower tier
                     // Check distance to current tier's floor
                     const distanceToDrop = points - tier.min;
@@ -223,13 +234,18 @@ const ReportsGenerator = () => {
                 const quarterMonths = qMap[selectedQuarter] || [];
 
                 return employees.map(e => {
-                    const quarterViolations = violations.filter(v => v.employeeId === e.id && quarterMonths.includes(new Date(v.date).getMonth()));
-                    const quarterPoints = calculateCurrentPoints(data.settings.startingPoints, quarterViolations, penalties);
+                    const quarterViolations = violations.filter(v => v.employeeId === e.id && quarterMonths.includes(parseInt(v.date.split('-')[1]) - 1));
+                    const qKey = `${now.getFullYear()}-${selectedQuarter}`;
+                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const quarterPoints = calculateCurrentPoints(startPoints, quarterViolations, penalties);
 
                     const prevQ = selectedQuarter === 'Q1' ? 'Q4' : `Q${parseInt(selectedQuarter[1]) - 1}`;
+                    const prevYear = selectedQuarter === 'Q1' ? now.getFullYear() - 1 : now.getFullYear();
+                    const prevQKey = `${prevYear}-${prevQ}`;
                     const prevMonths = qMap[prevQ] || [];
-                    const prevViolations = violations.filter(v => v.employeeId === e.id && prevMonths.includes(new Date(v.date).getMonth()));
-                    const prevPoints = calculateCurrentPoints(data.settings.startingPoints, prevViolations, penalties);
+                    const prevViolations = violations.filter(v => v.employeeId === e.id && prevMonths.includes(parseInt(v.date.split('-')[1]) - 1));
+                    const prevStartPoints = calculateQuarterlyStart(prevQKey, violations, data.settings);
+                    const prevPoints = calculateCurrentPoints(prevStartPoints, prevViolations, penalties);
 
                     return {
                         'Employee': e.name,
@@ -249,14 +265,14 @@ const ReportsGenerator = () => {
                     // Mock quarter logic: Q1=Jan-Mar, etc.
                     const qMap = { 'Q1': [0, 1, 2], 'Q2': [3, 4, 5], 'Q3': [6, 7, 8], 'Q4': [9, 10, 11] };
                     const months = qMap[selectedQuarter];
-                    filteredViolations = filteredViolations.filter(v => months.includes(new Date(v.date).getMonth()));
+                    filteredViolations = filteredViolations.filter(v => months.includes(parseInt(v.date.split('-')[1]) - 1));
                 }
 
                 return filteredViolations.map(v => ({
                     'Date': v.date,
-                    'Type': v.type,
+                    'Type': v.type + (v.shiftCovered ? ' (Covered)' : ''),
                     'Shift': v.shift || 'AM',
-                    'Points': -v.pointsDeducted
+                    'Points': v.shiftCovered ? '0 (Covered)' : -v.pointsDeducted
                 }));
             }
             case 12: // Recovery Trend
@@ -271,9 +287,11 @@ const ReportsGenerator = () => {
                 const quarterMonths = qMap[selectedQuarter] || [];
 
                 return employees.map(emp => {
-                    const quarterViolations = violations.filter(v => v.employeeId === emp.id && quarterMonths.includes(new Date(v.date).getMonth()));
-                    const points = calculateCurrentPoints(data.settings.startingPoints, quarterViolations, penalties);
-                    return { 'Employee': emp.name, 'Quarter': selectedQuarter, 'Status': determineTier(points).name };
+                    const quarterViolations = violations.filter(v => v.employeeId === emp.id && quarterMonths.includes(parseInt(v.date.split('-')[1]) - 1));
+                    const qKey = `${new Date().getFullYear()}-${selectedQuarter}`;
+                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const points = calculateCurrentPoints(startPoints, quarterViolations, penalties);
+                    return { 'Employee': emp.name, 'Quarter': selectedQuarter, 'Status': determineTier(points, data.settings.daSettings).name };
                 });
             }
             case 15: { // Tardy Breakdown
@@ -281,7 +299,7 @@ const ReportsGenerator = () => {
                 let targetViolations = violations.filter(v => v.type.includes('Tardy'));
 
                 // Filter by selected month (0-11)
-                targetViolations = targetViolations.filter(v => new Date(v.date).getMonth() === parseInt(selectedMonth));
+                targetViolations = targetViolations.filter(v => (parseInt(v.date.split('-')[1]) - 1) === parseInt(selectedMonth));
 
                 targetViolations.forEach(v => {
                     tardyTypes[v.type] = (tardyTypes[v.type] || 0) + 1;
@@ -305,14 +323,14 @@ const ReportsGenerator = () => {
 
                 const getDataForQuarter = (q) => {
                     const months = getQuarterMonths(q);
-                    const qViolations = violations.filter(v => months.includes(new Date(v.date).getMonth()));
+                    const qViolations = violations.filter(v => months.includes(parseInt(v.date.split('-')[1]) - 1));
 
                     const counts = {
-                        'Tardy (1-5 min)': 0,
-                        'Tardy (6-11 min)': 0,
-                        'Tardy (12-29 min)': 0,
-                        'Tardy (30+ min)': 0,
-                        'Callout': 0
+                        [VIOLATION_TYPES.TARDY_1_5]: 0,
+                        [VIOLATION_TYPES.TARDY_6_11]: 0,
+                        [VIOLATION_TYPES.TARDY_12_29]: 0,
+                        [VIOLATION_TYPES.TARDY_30_PLUS]: 0,
+                        [VIOLATION_TYPES.CALLOUT]: 0
                     };
 
                     qViolations.forEach(v => {
@@ -339,14 +357,16 @@ const ReportsGenerator = () => {
             case 19: { // DA Distribution
                 const distribution = { 'Good Standing': 0, 'Coaching': 0, 'Severe': 0, 'Final': 0, 'Termination': 0 };
                 employees.forEach(emp => {
-                    const points = calculateCurrentPoints(data.settings.startingPoints, violations.filter(v => v.employeeId === emp.id), penalties);
-                    const tier = determineTier(points);
+                    const qKey = getQuarterKey();
+                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const points = calculateCurrentPoints(startPoints, violations.filter(v => v.employeeId === emp.id), penalties);
+                    const tier = determineTier(points, data.settings.daSettings);
                     if (distribution[tier.name] !== undefined) distribution[tier.name]++;
                 });
                 return Object.entries(distribution).map(([status, count]) => ({ 'Status': status, 'Count': count }));
             }
             case 20: { // Positive Adjustments Report
-                const POSITIVE_TYPES = ['Early Arrival', 'Shift Pickup'];
+                const POSITIVE_TYPES = [VIOLATION_TYPES.EARLY_ARRIVAL, VIOLATION_TYPES.SHIFT_PICKUP];
                 let filtered = violations.filter(v => POSITIVE_TYPES.includes(v.type));
 
                 // Apply Employee Filter
@@ -358,7 +378,7 @@ const ReportsGenerator = () => {
                 if (selectedQuarter !== 'All') {
                     const qMap = { 'Q1': [0, 1, 2], 'Q2': [3, 4, 5], 'Q3': [6, 7, 8], 'Q4': [9, 10, 11] };
                     const months = qMap[selectedQuarter] || [];
-                    filtered = filtered.filter(v => months.includes(new Date(v.date).getMonth()));
+                    filtered = filtered.filter(v => months.includes(parseInt(v.date.split('-')[1]) - 1));
                 }
 
                 // Apply Month Filter (if we want to support it specifically, but Quarter is usually enough. Let's support Month if selectedMonth is used, but the UI might need a toggle. For now, let's stick to the requested "Quarter, Month, and by Employee". The current UI has separate selectors. Let's use them if they are visible.)
@@ -405,8 +425,71 @@ const ReportsGenerator = () => {
                     'Date': v.date,
                     'Employee': employees.find(e => e.id === v.employeeId)?.name,
                     'Type': v.type,
-                    'Points Added': data.settings.violationPenalties.positiveAdjustments?.[v.type] || (v.type === 'Early Arrival' ? 1 : 5)
+                    'Points Added': data.settings.violationPenalties.positiveAdjustments?.[v.type] || (v.type === VIOLATION_TYPES.EARLY_ARRIVAL ? 1 : 5)
                 }));
+            }
+
+            case 21: { // Starting Points
+                const empId = selectedEmployeeId || employees[0]?.id;
+                const emp = employees.find(e => e.id === empId);
+                if (!emp) return [{ 'Message': 'Select an employee to view data.' }];
+
+                const currentYear = new Date().getFullYear();
+                const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+                const qMap = { 'Q1': [0, 1, 2], 'Q2': [3, 4, 5], 'Q3': [6, 7, 8], 'Q4': [9, 10, 11] };
+
+                return quarters.map(q => {
+                    const qKey = `${currentYear}-${q}`;
+                    const months = qMap[q];
+
+                    // Get violations for this quarter
+                    const qViolations = violations.filter(v =>
+                        v.employeeId === empId &&
+                        months.includes(parseInt(v.date.split('-')[1]) - 1) &&
+                        v.date.startsWith(currentYear.toString())
+                    );
+
+                    // Calculate Starting Points
+                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === empId), data.settings);
+
+                    // Calculate End Score
+                    const endPoints = calculateCurrentPoints(startPoints, qViolations, penalties);
+
+                    // Determine DA Threshold (Tier) at end of quarter
+                    const tier = determineTier(endPoints, data.settings.daSettings);
+
+                    // Count Violations by Type
+                    const counts = {
+                        [VIOLATION_TYPES.CALLOUT]: 0,
+                        [VIOLATION_TYPES.TARDY_1_5]: 0,
+                        [VIOLATION_TYPES.TARDY_6_11]: 0,
+                        [VIOLATION_TYPES.TARDY_12_29]: 0,
+                        [VIOLATION_TYPES.TARDY_30_PLUS]: 0
+                    };
+
+                    let otherViolations = 0;
+
+                    qViolations.forEach(v => {
+                        if (counts[v.type] !== undefined) {
+                            counts[v.type]++;
+                        } else {
+                            otherViolations++;
+                        }
+                    });
+
+                    return {
+                        'Quarter': q,
+                        'Starting Score': startPoints,
+                        'End Score': endPoints,
+                        'DA Threshold': tier.name,
+                        'Call Outs': counts[VIOLATION_TYPES.CALLOUT],
+                        'Tardy (1-5)': counts[VIOLATION_TYPES.TARDY_1_5],
+                        'Tardy (6-11)': counts[VIOLATION_TYPES.TARDY_6_11],
+                        'Tardy (12-29)': counts[VIOLATION_TYPES.TARDY_12_29],
+                        'Tardy (30+)': counts[VIOLATION_TYPES.TARDY_30_PLUS],
+                        'Other': otherViolations
+                    };
+                });
             }
 
             default:
@@ -564,6 +647,67 @@ const ReportsGenerator = () => {
                             }}
                         />
                     </div>
+                </div>
+
+                {/* Special Reports Section */}
+                <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem' }}>
+                    <button
+                        onClick={() => setIsHealthCheckModalOpen(true)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.75rem',
+                            padding: '1rem 1.5rem',
+                            backgroundColor: 'var(--accent-success)',
+                            border: '1px solid var(--accent-success)',
+                            borderRadius: 'var(--radius-lg)',
+                            color: 'white',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            boxShadow: 'var(--shadow-sm)',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                        }}
+                    >
+                        <Activity size={20} />
+                        Employee Health Check
+                    </button>
+
+                    <button
+                        onClick={() => setIsEMDModalOpen(true)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.75rem',
+                            padding: '1rem 1.5rem',
+                            backgroundColor: 'var(--bg-secondary)',
+                            border: '1px solid var(--accent-primary)',
+                            borderRadius: 'var(--radius-lg)',
+                            color: 'var(--accent-primary)',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            boxShadow: 'var(--shadow-sm)',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--accent-primary)';
+                            e.currentTarget.style.color = 'white';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                            e.currentTarget.style.color = 'var(--accent-primary)';
+                        }}
+                    >
+                        <FileSpreadsheet size={20} />
+                        Generate EMD Report
+                    </button>
                 </div>
 
                 {Object.entries(groupedReports).map(([category, categoryReports]) => (
@@ -770,37 +914,8 @@ const ReportsGenerator = () => {
                                         </select>
                                     </div>
                                 )}
-                                {selectedReport.id === 17 && (
-                                    <div className="no-print" style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-                                        <div>
-                                            <label style={{ marginRight: '0.5rem', fontWeight: 500 }}>Quarter 1:</label>
-                                            <select
-                                                value={qoqQ1}
-                                                onChange={e => setQoqQ1(e.target.value)}
-                                                style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
-                                            >
-                                                <option value="Q1">Q1</option>
-                                                <option value="Q2">Q2</option>
-                                                <option value="Q3">Q3</option>
-                                                <option value="Q4">Q4</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label style={{ marginRight: '0.5rem', fontWeight: 500 }}>Quarter 2:</label>
-                                            <select
-                                                value={qoqQ2}
-                                                onChange={e => setQoqQ2(e.target.value)}
-                                                style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
-                                            >
-                                                <option value="Q1">Q1</option>
-                                                <option value="Q2">Q2</option>
-                                                <option value="Q3">Q3</option>
-                                                <option value="Q4">Q4</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+
+                            </div >
                             <div className="no-print" style={{ display: 'flex', gap: '0.5rem' }}>
                                 <button onClick={handleExportCSV} title="Export CSV" style={{
                                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
@@ -827,7 +942,7 @@ const ReportsGenerator = () => {
                                     <span>Export PDF</span>
                                 </button>
                             </div>
-                        </div>
+                        </div >
 
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
                             <thead>
@@ -848,34 +963,44 @@ const ReportsGenerator = () => {
                             </tbody>
                         </table>
 
-                        {selectedReport.id === 17 && reportData.length > 0 && (
-                            <div style={{ marginTop: '2rem', height: '400px' }}>
-                                <ResponsiveContainer width="100%" height="100%" key={`qoq-${qoqQ1}-${qoqQ2}`}>
-                                    <BarChart
-                                        data={reportData}
-                                        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                                    >
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="name" />
-                                        <YAxis />
-                                        <Tooltip />
-                                        <Legend />
-                                        <Bar dataKey={qoqQ1} fill="#8884d8" name={qoqQ1} />
-                                        <Bar dataKey={qoqQ2} fill="#82ca9d" name={qoqQ2} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </div>
-                        )}
+                        {
+                            selectedReport.id === 17 && reportData.length > 0 && (
+                                <div style={{ marginTop: '2rem', height: '400px' }}>
+                                    <ResponsiveContainer width="100%" height="100%" key={`qoq-${qoqQ1}-${qoqQ2}`}>
+                                        <BarChart
+                                            data={reportData}
+                                            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                                        >
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis dataKey="name" />
+                                            <YAxis />
+                                            <Tooltip />
+                                            <Legend />
+                                            <Bar dataKey={qoqQ1} fill="#8884d8" name={qoqQ1} />
+                                            <Bar dataKey={qoqQ2} fill="#82ca9d" name={qoqQ2} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            )
+                        }
 
                         <div style={{ marginTop: '2rem', paddingTop: '1rem', borderTop: '1px solid var(--bg-primary)', fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
                             CONFIDENTIAL - Internal Use Only
                         </div>
-                    </div>
-                </div>
+                    </div >
+                </div >
             )
             }
 
 
+            <EMDReportModal
+                isOpen={isEMDModalOpen}
+                onClose={() => setIsEMDModalOpen(false)}
+            />
+            <HealthCheckModal
+                isOpen={isHealthCheckModalOpen}
+                onClose={() => setIsHealthCheckModalOpen(false)}
+            />
         </div >
     );
 };

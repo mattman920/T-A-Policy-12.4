@@ -1,0 +1,85 @@
+# Backup and Import Functionality Documentation
+
+This document explains the technical implementation of the Backup (Export) and Import functionality in the Time and Attendance Tracker application. This guide is intended for an AI agent to understand how to implement or modify this feature.
+
+## Overview
+
+The application uses `localStorage` as its primary data store. The Backup/Import functionality allows users to serialize this state to a JSON file (Backup) and restore it (Import), effectively overwriting the current local state.
+
+## 1. Data Structure
+
+The application state is managed in `DataContext.jsx` and consists of the following key objects:
+
+*   **`employees`**: Array of employee objects (id, name, currentPoints, etc.).
+*   **`violations`**: Array of violation records (id, employeeId, date, type, pointsDeducted, etc.).
+*   **`issuedDAs`**: Array of strings representing issued Disciplinary Actions.
+*   **`settings`**: Configuration object containing:
+    *   `daSettings`: Thresholds for DA stages (e.g., { educational: 125, severe: 75 }).
+    *   `violationPenalties`: Point deductions for specific violation types.
+    *   `quarterlyPurges`: Records of manual quarter resets.
+    *   `geminiApiKey`: API key for AI features.
+    *   `startingPoints`: Default starting balance (usually 150).
+
+## 2. Export (Backup) Logic
+
+**Entry Point:** `exportDatabase` function in `src/contexts/DataContext.jsx`.
+
+**Process:**
+1.  The function retrieves the current state object (`data`) from the `DataContext`.
+2.  It dynamically imports `src/utils/backup.js`.
+3.  It calls `exportData(data)` from the utility module.
+
+**Utility Function (`src/utils/backup.js`):**
+*   **`exportData(data)`**:
+    *   Converts the `data` object to a formatted JSON string (`JSON.stringify(data, null, 2)`).
+    *   Creates a Data URI with the content (`data:application/json;charset=utf-8,...`).
+    *   Generates a filename: `time_tracker_backup_YYYY-MM-DD.json`.
+    *   Creates a temporary `<a>` element, sets the `href` and `download` attributes, and programmatically clicks it to trigger the browser's download dialog.
+
+## 3. Import (Restore) Logic
+
+**Entry Point:** `handleImport` in `src/pages/Settings.jsx` (UI) -> `importDatabase` in `src/contexts/DataContext.jsx` (Logic).
+
+**UI Workflow (`src/pages/Settings.jsx`):**
+1.  User clicks "Restore Backup" button, which triggers a hidden file input (`<input type="file" accept=".json" />`).
+2.  `handleImport` is triggered on file selection.
+3.  **Confirmation:** A browser confirm dialog warns: *"WARNING: This will overwrite all current data. Are you sure?"*
+4.  If confirmed, `importDatabase(file)` is called.
+5.  On success, the page is reloaded (`reload()`) to reflect changes.
+
+**Core Logic (`src/contexts/DataContext.jsx`):**
+1.  **Parsing:** Calls `importData(file)` from `src/utils/backup.js`.
+    *   Reads the file using `FileReader`.
+    *   Parses the JSON content.
+    *   **Validation:** Checks if `jsonObj.employees` exists and is an array. Throws an error if invalid.
+2.  **Merging:**
+    *   The imported data is merged with the current structure.
+    *   **Lists (Destructive):** `employees`, `violations`, and `issuedDAs` are **replaced** by the versions in the backup file.
+    *   **Settings (Merge):** Settings are merged: `{ ...currentSettings, ...importedSettings }`. This ensures that if the backup lacks certain new settings keys, the current defaults are preserved, but backup values take precedence for existing keys.
+3.  **Persistence:**
+    *   The merged data object is written to `localStorage` under the key `attendance_tracker_local_data`.
+4.  **Refresh:**
+    *   `window.location.reload()` is called to force a full application state reset from the newly saved `localStorage` data.
+
+## 4. Key Files
+
+*   **`src/contexts/DataContext.jsx`**: Manages the application state, holds the `exportDatabase` and `importDatabase` functions, and handles the persistence to `localStorage`.
+*   **`src/utils/backup.js`**: Contains the low-level file I/O logic (creating the download link, reading the file with `FileReader`).
+*   **`src/pages/Settings.jsx`**: Provides the UI for the buttons and handles the user confirmation flow.
+
+## 5. Implementation Checklist for AI Agent
+
+If implementing this in a new environment:
+
+1.  [ ] **State Management:** Ensure you have access to the full application state object.
+2.  [ ] **Utility Module:** Create a helper for file I/O to keep components clean.
+3.  [ ] **Export:**
+    *   Serialize state to JSON.
+    *   Trigger download via anchor tag.
+4.  [ ] **Import:**
+    *   Use `<input type="file">`.
+    *   Read file content.
+    *   Validate JSON structure (check for key arrays).
+    *   **Critical:** Warn the user before overwriting data.
+    *   Update the persistent store (Database or LocalStorage).
+    *   Trigger a state refresh/reload.

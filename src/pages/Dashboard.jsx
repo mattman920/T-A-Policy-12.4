@@ -2,7 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { useData } from '../contexts/DataContext';
 import { Users, CheckCircle, AlertTriangle, TrendingDown } from 'lucide-react';
 import StatCard from '../components/StatCard';
-import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS, groupConsecutiveCallouts } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, STARTING_POINTS, TIERS, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { getRequiredDAs } from '../services/daService';
+import { getQuarterKey } from '../utils/dateUtils';
 import { useNavigate } from 'react-router-dom';
 
 import TierBreakdown from '../components/TierBreakdown';
@@ -41,7 +43,13 @@ const Dashboard = () => {
   // All violations for active employees IN CURRENT QUARTER (used for point calculation)
   const allActiveViolations = allViolations.filter(v => {
     const isActive = employees.some(e => e.id === v.employeeId);
-    const isInQuarter = new Date(v.date) >= currentQuarterStart;
+
+    // Fix: Ensure consistent date parsing to avoid timezone issues
+    // v.date is YYYY-MM-DD. Appending T00:00:00 forces local time interpretation
+    // matching how currentQuarterStart (new Date(...)) is created.
+    const violationDate = new Date(`${v.date}T00:00:00`);
+    const isInQuarter = violationDate >= currentQuarterStart;
+
     return isActive && isInQuarter;
   });
 
@@ -58,28 +66,44 @@ const Dashboard = () => {
     // Get issued DAs from data context
     const issuedDAs = data?.issuedDAs || [];
 
+    // Calculate required DAs for all employees
+    // We can do this more efficiently by iterating once
     allEmployees.forEach(emp => {
       if (emp.archived) {
         terminations++;
         return;
       }
 
+      // Use the new service to find ALL unissued DAs across history
+      // This returns an array of required DAs for this employee
+      const required = getRequiredDAs(emp, allViolations, data.settings, issuedDAs);
+
+      required.forEach(da => {
+        if (da.tier === TIERS.COACHING.name) coaching++;
+        else if (da.tier === TIERS.SEVERE.name) severe++;
+        else if (da.tier === TIERS.FINAL.name) final++;
+        // We don't typically count "Termination" in "Action Required" stats if it's already in "Terminations" count,
+        // but if they are active and have < 0 points, they might need a "Termination DA" processed.
+        // The original code didn't seem to count termination candidates in "Action Required", 
+        // but let's stick to the requested logic: "everytime an employee hits... termination... it needs to appear".
+        // However, the StatCard for Terminations (line 210) counts archived employees.
+        // If an active employee hits termination threshold, they should probably be in Action Required.
+        else if (da.tier === TIERS.TERMINATION.name) final++; // Group with Final or separate? 
+        // Let's group Termination triggers with Final for the "Action Required" badge, or just add them up.
+        // The StatCard shows "coachingCount + severeCount + finalCount". 
+        // I will add termination triggers to 'finalCount' for visibility, or just ensure they are counted.
+      });
+
+      // Also calculate current standing for "Good Standing" count
+      // This is separate from "Action Required" history
+      const qKey = getQuarterKey();
+      const startPoints = calculateQuarterlyStart(qKey, allViolations, data.settings);
       const empViolations = allActiveViolations.filter(v => v.employeeId === emp.id);
-      const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
-      const tier = determineTier(points);
+      const points = calculateCurrentPoints(startPoints, empViolations, data.settings.violationPenalties);
+      const tier = determineTier(points, data.settings.daSettings);
 
-      // Check if DA is already issued
-      const daKey = `${emp.id}-${tier.name}`;
-      const isIssued = issuedDAs.includes(daKey);
-
-      if (tier.min === TIERS.GOOD.min) {
+      if (tier.name === TIERS.GOOD.name) {
         good++;
-      } else if (tier.min === TIERS.COACHING.min) {
-        if (!isIssued) coaching++;
-      } else if (tier.min === TIERS.SEVERE.min) {
-        if (!isIssued) severe++;
-      } else if (tier.min === TIERS.FINAL.min) {
-        if (!isIssued) final++;
       }
     });
 
@@ -91,13 +115,13 @@ const Dashboard = () => {
       coachingCount: coaching,
       terminationCount: terminations
     };
-  }, [employees, violations, data?.issuedDAs, allEmployees]);
+  }, [employees, violations, data?.issuedDAs, allEmployees, allActiveViolations, data.settings]);
 
   // --- Chart Data ---
   const violationsByMonth = useMemo(() => {
     const counts = {};
     violations.forEach(v => {
-      const d = new Date(v.date);
+      const d = new Date(v.date + 'T00:00:00');
       const key = `${d.toLocaleString('default', { month: 'short' })} ${d.getFullYear()}`;
       counts[key] = (counts[key] || 0) + 1;
     });
@@ -105,10 +129,20 @@ const Dashboard = () => {
   }, [violations]);
 
   const violationsByType = useMemo(() => {
+    // Initialize counts for all negative violation types
     const counts = {};
-    violations.forEach(v => {
-      counts[v.type] = (counts[v.type] || 0) + 1;
+    const negativeTypes = Object.values(VIOLATION_TYPES).filter(t => !POSITIVE_TYPES.includes(t));
+
+    negativeTypes.forEach(type => {
+      counts[type] = 0;
     });
+
+    violations.forEach(v => {
+      if (counts.hasOwnProperty(v.type)) {
+        counts[v.type] = (counts[v.type] || 0) + 1;
+      }
+    });
+
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [violations]);
 
@@ -117,7 +151,9 @@ const Dashboard = () => {
     return employees.map(emp => {
       const empViolations = violations.filter(v => v.employeeId === emp.id);
       const allEmpViolations = allActiveViolations.filter(v => v.employeeId === emp.id);
-      const points = calculateCurrentPoints(data.settings.startingPoints, allEmpViolations, data.settings.violationPenalties);
+      const qKey = getQuarterKey();
+      const startPoints = calculateQuarterlyStart(qKey, allViolations, data.settings);
+      const points = calculateCurrentPoints(startPoints, allEmpViolations, data.settings.violationPenalties);
       return {
         ...emp,
         points,
@@ -130,8 +166,10 @@ const Dashboard = () => {
 
   // --- Filters ---
   const uniqueTypes = useMemo(() => {
-    return [...new Set(violations.map(v => v.type))];
-  }, [violations]);
+    // Use all defined violation types instead of just what's in the current list
+    // Filter out positive types if we only want "violations"
+    return Object.values(VIOLATION_TYPES).filter(t => !POSITIVE_TYPES.includes(t));
+  }, []);
 
   const filteredViolations = useMemo(() => {
     return violations.filter(v => {
@@ -141,24 +179,19 @@ const Dashboard = () => {
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [violations, filterEmployee, filterType]);
 
-  const getViolationColor = (type) => {
-    switch (type) {
-      case 'Tardy (1-5 min)': return '#22c55e'; // Good Green
-      case 'Tardy (6-11 min)': return '#3b82f6'; // Blue
-      case 'Tardy (12-29 min)': return '#f59e0b'; // Yellow
-      case 'Tardy (30+ min)': return '#ec4899'; // Pink
-      case 'Callout': return '#ef4444'; // Red
-      default: return '#8884d8';
-    }
+  const VIOLATION_STYLES = {
+    [VIOLATION_TYPES.TARDY_1_5]: { bg: '#dcfce7', color: '#059669', label: 'Tardy (1-5 min)' }, // Emerald 600
+    [VIOLATION_TYPES.TARDY_6_11]: { bg: '#dbeafe', color: '#2563EB', label: 'Tardy (6-11 min)' }, // Blue 600
+    [VIOLATION_TYPES.TARDY_12_29]: { bg: '#fef9c3', color: '#D97706', label: 'Tardy (12-29 min)' }, // Amber 600
+    [VIOLATION_TYPES.TARDY_30_PLUS]: { bg: '#fce7f3', color: '#DB2777', label: 'Tardy (30+ min)' }, // Pink 600
+    [VIOLATION_TYPES.CALLOUT]: { bg: '#fee2e2', color: '#DC2626', label: 'Call Out' }, // Red 600
+    [VIOLATION_TYPES.EARLY_ARRIVAL]: { bg: '#f3e8ff', color: '#6b21a8', label: 'Early Arrival' }, // Purple
+    [VIOLATION_TYPES.SHIFT_PICKUP]: { bg: '#ffedd5', color: '#9a3412', label: 'Shift Pickup' }, // Orange
   };
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <p>Loading Dashboard...</p>
-      </div>
-    );
-  }
+  const getViolationColor = (type) => {
+    return VIOLATION_STYLES[type]?.color || '#6B7280';
+  };
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
@@ -204,7 +237,7 @@ const Dashboard = () => {
 
       {/* Tier Breakdown */}
       <div style={{ marginBottom: '2rem' }}>
-        <TierBreakdown employees={employees} violations={violations} startingPoints={data.settings.startingPoints} />
+        <TierBreakdown employees={employees} violations={violations} startingPoints={data.settings.startingPoints} daSettings={data.settings.daSettings} />
       </div>
 
       {/* Charts Row */}
@@ -240,13 +273,14 @@ const Dashboard = () => {
                   outerRadius={100}
                   fill="#8884d8"
                   dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => percent > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : ''}
                 >
                   {violationsByType.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={getViolationColor(entry.name)} />
                   ))}
                 </Pie>
                 <Tooltip />
+                <Legend />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -315,8 +349,8 @@ const Dashboard = () => {
                           padding: '0.25rem 0.5rem',
                           borderRadius: '4px',
                           fontSize: '0.8rem',
-                          backgroundColor: v.type === 'Callout' ? 'var(--accent-danger-bg)' : 'var(--accent-warning-bg)',
-                          color: v.type === 'Callout' ? 'var(--accent-danger)' : 'var(--accent-warning)',
+                          backgroundColor: VIOLATION_STYLES[v.type]?.bg || '#f3f4f6',
+                          color: VIOLATION_STYLES[v.type]?.color || '#374151',
                           fontWeight: 500
                         }}>
                           {v.type}

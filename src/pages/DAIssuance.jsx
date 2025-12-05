@@ -1,6 +1,7 @@
 import React from 'react';
 import { useData } from '../contexts/DataContext';
 import { calculateCurrentPoints, determineTier, STARTING_POINTS, TIERS } from '../utils/pointCalculator';
+import { getRequiredDAs } from '../services/daService';
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -17,27 +18,21 @@ const DAIssuance = () => {
     const employees = data?.employees || [];
     const violations = data?.violations || [];
 
-    // Identify pending DAs
-    const pendingDAs = employees.map(emp => {
-        const empViolations = violations.filter(v => v.employeeId === emp.id);
-        const points = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
-        const tier = determineTier(points);
-
-        // Check if this specific DA instance (Employee + Tier) has been issued
-        // A simple key: "EmpID-TierName"
-        const daKey = `${emp.id}-${tier.name}`;
-        const isIssued = issuedDAs.includes(daKey);
-
-        if (tier.name !== 'Good Standing' && !isIssued) {
-            return {
-                ...emp,
-                points,
-                tier: tier.name,
-                daKey
-            };
-        }
-        return null;
-    }).filter(Boolean);
+    // Identify pending DAs using the centralized service
+    // This now returns DAs across all history, with quarter info
+    const pendingDAs = React.useMemo(() => {
+        const required = [];
+        employees.forEach(emp => {
+            if (emp.archived) return;
+            const empDAs = getRequiredDAs(emp, violations, data.settings, issuedDAs);
+            required.push(...empDAs);
+        });
+        return required.map(da => ({
+            ...da,
+            name: da.employeeName, // Map for UI compatibility
+            daKey: da.key
+        }));
+    }, [employees, violations, data.settings, issuedDAs]);
 
     // Filter based on URL param
     const filteredDAs = filterTier === 'All'
@@ -107,6 +102,7 @@ const DAIssuance = () => {
                                 <h3 style={{ fontWeight: 700, fontSize: '1.1rem' }}>{da.name}</h3>
                                 <div style={{ display: 'flex', gap: '1rem', marginTop: '0.25rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
                                     <span>Points: <strong>{da.points}</strong></span>
+                                    <span>Quarter: <strong>{da.quarter}</strong></span>
                                     <span>Action Required: <strong style={{ color: 'var(--accent-primary)' }}>{da.tier}</strong></span>
                                 </div>
                             </div>

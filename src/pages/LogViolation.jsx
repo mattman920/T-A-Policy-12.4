@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useData } from '../contexts/DataContext';
-import { calculateDeductions, calculateCurrentPoints, STARTING_POINTS, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { calculateDeductions, calculateCurrentPoints, calculateQuarterlyStart, STARTING_POINTS, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { getQuarterKey, getQuarterDates } from '../utils/dateUtils';
 import { AlertTriangle, CheckCircle, User, Calendar, Clock, Edit2, ArrowLeft, Save, X, Trash2, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
@@ -14,9 +15,10 @@ const LogViolation = () => {
 
     // Log Mode State
     const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
-    const [violationType, setViolationType] = useState('Tardy (1-5 min)');
+    const [violationType, setViolationType] = useState(VIOLATION_TYPES.TARDY_1_5);
     const [violationDate, setViolationDate] = useState(new Date().toISOString().split('T')[0]);
     const [violationShift, setViolationShift] = useState('AM');
+    const [shiftCovered, setShiftCovered] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Edit Mode State
@@ -31,19 +33,40 @@ const LogViolation = () => {
     const getPointImpact = () => {
         if (!selectedEmployeeId) return 0;
 
-        const empViolations = violations.filter(v => v.employeeId === selectedEmployeeId);
-        const currentPoints = calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
+        const targetDate = violationDate ? new Date(violationDate) : new Date();
+        const qKey = getQuarterKey(targetDate);
+        const { startDate, endDate } = getQuarterDates(qKey);
 
-        const newViolation = { type: violationType, date: violationDate };
-        const newPoints = calculateCurrentPoints(data.settings.startingPoints, [...empViolations, newViolation], data.settings.violationPenalties);
+        const empViolations = violations.filter(v => v.employeeId === selectedEmployeeId);
+        const qViolations = empViolations.filter(v => {
+            const d = new Date(v.date);
+            return d >= startDate && d <= endDate;
+        });
+
+        const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
+        const currentPoints = calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
+
+        const newViolation = { type: violationType, date: violationDate, shiftCovered };
+        const newPoints = calculateCurrentPoints(startPoints, [...qViolations, newViolation], data.settings.violationPenalties);
 
         return newPoints - currentPoints;
     };
 
     const getCurrentPoints = () => {
         if (!selectedEmployeeId) return 0;
+
+        const targetDate = violationDate ? new Date(violationDate) : new Date();
+        const qKey = getQuarterKey(targetDate);
+        const { startDate, endDate } = getQuarterDates(qKey);
+
         const empViolations = violations.filter(v => v.employeeId === selectedEmployeeId);
-        return calculateCurrentPoints(data.settings.startingPoints, empViolations, data.settings.violationPenalties);
+        const qViolations = empViolations.filter(v => {
+            const d = new Date(v.date);
+            return d >= startDate && d <= endDate;
+        });
+
+        const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
+        return calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
     };
 
     const handleSubmit = async (e) => {
@@ -59,13 +82,14 @@ const LogViolation = () => {
         const pointsToLog = Math.abs(impact);
 
         try {
-            await addViolation(selectedEmployeeId, violationType, violationDate, pointsToLog, violationShift);
+            await addViolation(selectedEmployeeId, violationType, violationDate, pointsToLog, violationShift, shiftCovered);
 
             // Reset form
             setSelectedEmployeeId('');
-            setViolationType('Tardy (1-5 min)');
+            setViolationType(VIOLATION_TYPES.TARDY_1_5);
             setViolationDate(new Date().toISOString().split('T')[0]);
             setViolationShift('AM');
+            setShiftCovered(false);
 
             alert('Violation logged successfully!');
         } catch (error) {
@@ -76,8 +100,9 @@ const LogViolation = () => {
     };
 
     const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
-    const pointImpact = getPointImpact();
-    const currentPoints = getCurrentPoints();
+
+    const pointImpact = useMemo(() => getPointImpact(), [selectedEmployeeId, violationDate, violationType, violationShift, shiftCovered, violations, data.settings]);
+    const currentPoints = useMemo(() => getCurrentPoints(), [selectedEmployeeId, violationDate, violations, data.settings]);
     const newPoints = currentPoints + pointImpact;
 
     // --- Edit Mode Logic ---
@@ -150,10 +175,20 @@ const LogViolation = () => {
         e.preventDefault();
         try {
             // Calculate the correct points deducted for this violation in its new state
-            const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
-            const currentPointsWithoutThis = calculateCurrentPoints(data.settings.startingPoints, otherViolations, data.settings.violationPenalties);
+            const targetDate = new Date(editingViolation.date);
+            const qKey = getQuarterKey(targetDate);
+            const { startDate, endDate } = getQuarterDates(qKey);
 
-            const newPointsWithThis = calculateCurrentPoints(data.settings.startingPoints, [...otherViolations, editingViolation], data.settings.violationPenalties);
+            const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
+            const qViolations = otherViolations.filter(v => {
+                const d = new Date(v.date);
+                return d >= startDate && d <= endDate;
+            });
+
+            const startPoints = calculateQuarterlyStart(qKey, otherViolations, data.settings);
+            const currentPointsWithoutThis = calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
+
+            const newPointsWithThis = calculateCurrentPoints(startPoints, [...qViolations, editingViolation], data.settings.violationPenalties);
             const impact = newPointsWithThis - currentPointsWithoutThis;
 
             // Update the violation with the calculated points (absolute value for storage, usually)
@@ -293,13 +328,13 @@ const LogViolation = () => {
                                         fontWeight: '500'
                                     }}
                                 >
-                                    <option value="Tardy (1-5 min)">Tardy (1-5 min)</option>
-                                    <option value="Tardy (6-11 min)">Tardy (6-11 min)</option>
-                                    <option value="Tardy (12-29 min)">Tardy (12-29 min)</option>
-                                    <option value="Tardy (30+ min)">Tardy (30+ min)</option>
-                                    <option value="Callout">Callout</option>
-                                    <option value="Early Arrival">Early Arrival</option>
-                                    <option value="Shift Pickup">Shift Pickup</option>
+                                    <option value={VIOLATION_TYPES.TARDY_1_5}>{VIOLATION_TYPES.TARDY_1_5}</option>
+                                    <option value={VIOLATION_TYPES.TARDY_6_11}>{VIOLATION_TYPES.TARDY_6_11}</option>
+                                    <option value={VIOLATION_TYPES.TARDY_12_29}>{VIOLATION_TYPES.TARDY_12_29}</option>
+                                    <option value={VIOLATION_TYPES.TARDY_30_PLUS}>{VIOLATION_TYPES.TARDY_30_PLUS}</option>
+                                    <option value={VIOLATION_TYPES.CALLOUT}>{VIOLATION_TYPES.CALLOUT}</option>
+                                    <option value={VIOLATION_TYPES.EARLY_ARRIVAL}>{VIOLATION_TYPES.EARLY_ARRIVAL}</option>
+                                    <option value={VIOLATION_TYPES.SHIFT_PICKUP}>{VIOLATION_TYPES.SHIFT_PICKUP}</option>
                                 </select>
                             </div>
 
@@ -366,6 +401,37 @@ const LogViolation = () => {
                                         <option value="PM">PM</option>
                                     </select>
                                 </div>
+
+                                {/* Shift Covered Checkbox - Only for Callouts */}
+                                {violationType === VIOLATION_TYPES.CALLOUT && (
+                                    <div style={{
+                                        backgroundColor: 'var(--bg-primary)',
+                                        padding: '0.75rem',
+                                        borderRadius: 'var(--radius-md)',
+                                        border: '1px solid var(--border-color)',
+                                        boxShadow: 'var(--shadow-sm)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gridColumn: 'span 2'
+                                    }}>
+                                        <input
+                                            type="checkbox"
+                                            id="shiftCovered"
+                                            checked={shiftCovered}
+                                            onChange={(e) => setShiftCovered(e.target.checked)}
+                                            style={{
+                                                width: '1.25rem',
+                                                height: '1.25rem',
+                                                marginRight: '0.75rem',
+                                                cursor: 'pointer',
+                                                accentColor: 'var(--accent-primary)'
+                                            }}
+                                        />
+                                        <label htmlFor="shiftCovered" style={{ cursor: 'pointer', fontWeight: '500', fontSize: '0.95rem' }}>
+                                            Shift Covered? (No points deducted)
+                                        </label>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -555,26 +621,34 @@ const LogViolation = () => {
                                             <td style={{ padding: '1rem' }}>{v.date}</td>
                                             <td style={{ padding: '1rem', fontWeight: 500 }}>{emp?.name || 'Unknown'}</td>
                                             <td style={{ padding: '1rem' }}>
-                                                <span style={{
-                                                    padding: '0.25rem 0.5rem',
-                                                    borderRadius: '4px',
-                                                    fontSize: '0.85rem',
-                                                    backgroundColor: v.type === 'Callout' ? 'var(--accent-danger-bg)' :
-                                                        (v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? 'var(--accent-success-bg)' : 'var(--accent-warning-bg)',
-                                                    color: v.type === 'Callout' ? 'var(--accent-danger)' :
-                                                        (v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? 'var(--accent-success)' : 'var(--accent-warning)',
-                                                    fontWeight: 500
-                                                }}>
-                                                    {v.type}
-                                                </span>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                                    <span style={{
+                                                        padding: '0.25rem 0.5rem',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.85rem',
+                                                        backgroundColor: v.type === VIOLATION_TYPES.CALLOUT ? 'var(--accent-danger-bg)' :
+                                                            (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? 'var(--accent-success-bg)' : 'var(--accent-warning-bg)',
+                                                        color: v.type === VIOLATION_TYPES.CALLOUT ? 'var(--accent-danger)' :
+                                                            (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? 'var(--accent-success)' : 'var(--accent-warning)',
+                                                        fontWeight: 500,
+                                                        width: 'fit-content'
+                                                    }}>
+                                                        {v.type}
+                                                    </span>
+                                                    {v.shiftCovered && (
+                                                        <span style={{ fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight: '600' }}>
+                                                            Shift Covered
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td style={{
                                                 padding: '1rem',
                                                 textAlign: 'center',
                                                 fontWeight: 'bold',
-                                                color: (v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? 'var(--accent-success)' : 'var(--accent-danger)'
+                                                color: (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? 'var(--accent-success)' : 'var(--accent-danger)'
                                             }}>
-                                                {(v.type === 'Early Arrival' || v.type === 'Shift Pickup') ? '+' : '-'}{v.pointsDeducted}
+                                                {(v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? '+' : '-'}{v.pointsDeducted}
                                             </td>
                                             <td style={{ padding: '1rem', textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                                                 <button
@@ -634,13 +708,13 @@ const LogViolation = () => {
                                     color: '#ffffff'
                                 }}
                             >
-                                <option value="Tardy (1-5 min)">Tardy (1-5 min)</option>
-                                <option value="Tardy (6-11 min)">Tardy (6-11 min)</option>
-                                <option value="Tardy (12-29 min)">Tardy (12-29 min)</option>
-                                <option value="Tardy (30+ min)">Tardy (30+ min)</option>
-                                <option value="Callout">Callout</option>
-                                <option value="Early Arrival">Early Arrival</option>
-                                <option value="Shift Pickup">Shift Pickup</option>
+                                <option value={VIOLATION_TYPES.TARDY_1_5}>{VIOLATION_TYPES.TARDY_1_5}</option>
+                                <option value={VIOLATION_TYPES.TARDY_6_11}>{VIOLATION_TYPES.TARDY_6_11}</option>
+                                <option value={VIOLATION_TYPES.TARDY_12_29}>{VIOLATION_TYPES.TARDY_12_29}</option>
+                                <option value={VIOLATION_TYPES.TARDY_30_PLUS}>{VIOLATION_TYPES.TARDY_30_PLUS}</option>
+                                <option value={VIOLATION_TYPES.CALLOUT}>{VIOLATION_TYPES.CALLOUT}</option>
+                                <option value={VIOLATION_TYPES.EARLY_ARRIVAL}>{VIOLATION_TYPES.EARLY_ARRIVAL}</option>
+                                <option value={VIOLATION_TYPES.SHIFT_PICKUP}>{VIOLATION_TYPES.SHIFT_PICKUP}</option>
                             </select>
                         </div>
                         <div>
@@ -680,6 +754,26 @@ const LogViolation = () => {
                                 <option value="PM">PM</option>
                             </select>
                         </div>
+
+                        {editingViolation.type === VIOLATION_TYPES.CALLOUT && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <input
+                                    type="checkbox"
+                                    id="editShiftCovered"
+                                    checked={editingViolation.shiftCovered || false}
+                                    onChange={(e) => setEditingViolation({ ...editingViolation, shiftCovered: e.target.checked })}
+                                    style={{
+                                        width: '1.25rem',
+                                        height: '1.25rem',
+                                        cursor: 'pointer',
+                                        accentColor: 'var(--accent-primary)'
+                                    }}
+                                />
+                                <label htmlFor="editShiftCovered" style={{ cursor: 'pointer', fontWeight: '500', fontSize: '0.95rem' }}>
+                                    Shift Covered? (No points deducted)
+                                </label>
+                            </div>
+                        )}
                         {/* Recalculate points logic */}
                         {editingViolation && (
                             <div style={{
@@ -693,16 +787,25 @@ const LogViolation = () => {
                                 <p style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
                                     {(() => {
                                         // Calculate impact dynamically
+                                        const targetDate = new Date(editingViolation.date);
+                                        const qKey = getQuarterKey(targetDate);
+                                        const { startDate, endDate } = getQuarterDates(qKey);
+
                                         const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
-                                        const currentPointsWithoutThis = calculateCurrentPoints(data.settings.startingPoints, otherViolations, data.settings.violationPenalties);
+                                        const qViolations = otherViolations.filter(v => {
+                                            const d = new Date(v.date);
+                                            return d >= startDate && d <= endDate;
+                                        });
+
+                                        const startPoints = calculateQuarterlyStart(qKey, otherViolations, data.settings);
+                                        const currentPointsWithoutThis = calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
 
                                         // Construct temp violation for calculation
                                         const tempViolation = {
                                             ...editingViolation,
-                                            // Ensure date is string YYYY-MM-DD
                                         };
 
-                                        const newPointsWithThis = calculateCurrentPoints(data.settings.startingPoints, [...otherViolations, tempViolation], data.settings.violationPenalties);
+                                        const newPointsWithThis = calculateCurrentPoints(startPoints, [...qViolations, tempViolation], data.settings.violationPenalties);
                                         const impact = newPointsWithThis - currentPointsWithoutThis;
 
                                         // Update the editingViolation pointsDeducted if it changed (careful with infinite loop, so just display here and update on submit)

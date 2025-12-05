@@ -122,7 +122,7 @@ const ViolationPenalties = () => {
                             <div key={type}>
                                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.9rem' }}>{type}</label>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
-                                    {values.map((val, idx) => (
+                                    {Array.isArray(values) && values.map((val, idx) => (
                                         <div key={idx} style={{
                                             backgroundColor: 'var(--bg-primary)',
                                             padding: '0.75rem',

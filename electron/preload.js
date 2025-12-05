@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld('electron', {
     writeData: (data) => ipcRenderer.invoke('write-data', data),
     print: () => ipcRenderer.invoke('print'),
     savePdf: (options) => ipcRenderer.invoke('save-pdf', options),
+    saveMultiplePdfs: (files) => ipcRenderer.invoke('save-multiple-pdfs', files),
 });

@@ -3,10 +3,12 @@ import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, TrendingUp, Moon, Sun, Settings, AlertCircle, ClipboardList, LogOut } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useData } from '../contexts/DataContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const Sidebar = () => {
     const { isDark, toggleTheme } = useTheme();
     const { data } = useData();
+    const { logout } = useAuth();
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -102,7 +104,10 @@ const Sidebar = () => {
                 </button>
 
                 <button
-                    onClick={() => import('../utils/supabaseClient').then(({ supabase }) => supabase.auth.signOut())}
+                    onClick={async () => {
+                        await logout();
+                        // Optional: redirect or reload if needed, but AuthContext change should trigger re-render/redirect
+                    }}
                     style={{
                         display: 'flex',
                         alignItems: 'center',

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useData } from '../contexts/DataContext';
-import { calculateCurrentPoints, determineTier, STARTING_POINTS, VIOLATION_TYPES, groupConsecutiveCallouts } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, STARTING_POINTS, VIOLATION_TYPES, groupConsecutiveCallouts, calculateQuarterlyStart } from '../utils/pointCalculator';
 import { Trophy, AlertCircle, Calendar } from 'lucide-react';
 
 const Scorecard = () => {
@@ -66,18 +66,16 @@ const Scorecard = () => {
 
                 // Quarter specific stats
                 const quarterViolations = empViolations.filter(v => {
-                    const vDate = new Date(v.date);
-                    // Adjust for timezone if needed, but assuming local date comparison for simplicity based on existing code
-                    // The existing code used local time for quarterStart/End, so we stick to that.
-                    // However, pointCalculator uses UTC for some things. 
-                    // Let's stick to the existing logic in Scorecard.jsx which used:
-                    // const vDate = new Date(v.date);
+                    const vDate = new Date(v.date + 'T00:00:00');
                     return vDate >= quarterStart && vDate <= quarterEnd;
                 });
 
+                // Calculate dynamic starting points for the SELECTED quarter
+                const startingPoints = calculateQuarterlyStart(selectedQuarter, empViolations, data.settings);
+
                 // Current Standing (Based on selected quarter)
-                const currentPoints = calculateCurrentPoints(data.settings.startingPoints, quarterViolations, data.settings.violationPenalties);
-                const tier = determineTier(currentPoints);
+                const currentPoints = calculateCurrentPoints(startingPoints, quarterViolations, data.settings.violationPenalties);
+                const tier = determineTier(currentPoints, data.settings.daSettings);
 
                 const counts = {
                     [VIOLATION_TYPES.TARDY_1_5]: 0,
