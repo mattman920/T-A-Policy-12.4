@@ -1,3 +1,17 @@
 [[edge_functions]]
   function = "fireproof"
-  path = "/fireproof/*"
+  path = "/fireproof"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+
+[dev]
+  command = "npm run vite:dev"
+  targetPort = 5173
+  port = 8888
+  publish = "dist"

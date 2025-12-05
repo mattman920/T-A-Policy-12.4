@@ -8,16 +8,17 @@
   "type": "commonjs",
   "scripts": {
     "dev": "concurrently \"npm run vite:dev\" \"wait-on tcp:5173 && npm run electron:dev\"",
+    "dev:netlify": "concurrently \"npx netlify dev\" \"wait-on tcp:8888 && npm run electron:dev\"",
     "vite:dev": "vite",
     "electron:dev": "cross-env NODE_ENV=development electron .",
-    "build": "vite build && electron-builder",
+    "build": "vite build",
+    "build:electron": "vite build && electron-builder",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fireproof/core": "^0.24.0",
+    "@fireproof/core": "0.19.118",
     "@fireproof/netlify": "^0.19.118",
-    "@fireproof/react": "^0.10.20",
     "@netlify/blobs": "^10.4.2",
     "@supabase/supabase-js": "^2.85.0",
     "jspdf": "^3.0.4",
@@ -27,8 +28,10 @@
     "pg": "^8.16.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-is": "^19.2.1",
     "react-router-dom": "^7.9.6",
     "recharts": "^3.5.0",
+    "use-fireproof": "0.19.118",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

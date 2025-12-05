@@ -12,9 +12,8 @@
     "packageJson": {
       "dependencies": [
         "npm:@eslint/js@^9.39.1",
-        "npm:@fireproof/core@0.24",
+        "npm:@fireproof/core@0.19.118",
         "npm:@fireproof/netlify@~0.19.118",
-        "npm:@fireproof/react@~0.10.20",
         "npm:@netlify/blobs@^10.4.2",
         "npm:@supabase/supabase-js@^2.85.0",
         "npm:@types/react-dom@^19.2.3",
@@ -34,9 +33,11 @@
         "npm:papaparse@^5.5.3",
         "npm:pg@^8.16.3",
         "npm:react-dom@^19.2.0",
+        "npm:react-is@^19.2.1",
         "npm:react-router-dom@^7.9.6",
         "npm:react@^19.2.0",
         "npm:recharts@^3.5.0",
+        "npm:use-fireproof@0.19.118",
         "npm:uuid@13",
         "npm:vite@^7.2.4",
         "npm:wait-on@^9.0.3"

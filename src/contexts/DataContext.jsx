@@ -115,15 +115,16 @@ export function DataProvider({ children }) {
     );
 }
 
+// Define map function outside component for stable reference
+const mapAllDocs = (doc) => {
+    // console.log('Indexing doc:', doc._id);
+    return doc.docType || 'unknown';
+};
+
 // Split into inner component to use hooks properly
 function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, children }) {
-    // We need to define indexes if we use 'useLiveQuery(db, index, value)'
-    // Or we can just load all and filter if dataset is small.
-    // For simplicity and robustness given "Refactor", I will load all docs and filter in memory.
-    // This avoids index creation complexity if not strictly needed yet.
-
-    // Index by docType for efficiency and to avoid encoding errors with full docs
-    const allDocs = useLiveQuery(doc => doc.docType);
+    // Index by docType for efficiency
+    const allDocs = useLiveQuery(mapAllDocs);
 
     const [data, setData] = useState({
         employees: [],
@@ -144,6 +145,7 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
     useEffect(() => {
         if (allDocs.docs) {
             const docs = allDocs.docs;
+            console.log('DataContext: Live query updated', docs.length, 'docs');
 
             const employees = docs.filter(d => d.docType === 'employee');
             const violations = docs.filter(d => d.docType === 'violation').map(v => ({ ...v, type: v.violationType || v.type })); // Handle migration/naming
@@ -185,39 +187,214 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
         }
     }, [allDocs.docs]);
 
+    console.log('DataProvider: organizationId', organizationId);
+
+    // Helper to recursively remove undefined values
+    const deepSanitize = (obj) => {
+        if (Number.isNaN(obj)) return null; // Handle NaN
+        if (obj instanceof Date) {
+            return obj.toISOString();
+        }
+        if (Array.isArray(obj)) {
+            return obj.map(v => {
+                const sanitized = deepSanitize(v);
+                return sanitized === undefined ? null : sanitized;
+            });
+        } else if (obj !== null && typeof obj === 'object') {
+            return Object.keys(obj).reduce((acc, key) => {
+                const value = deepSanitize(obj[key]);
+                if (value !== undefined) {
+                    acc[key] = value;
+                }
+                return acc;
+            }, {});
+        }
+        return obj;
+    };
+
     const addEmployee = async (name, startDate) => {
-        const newEmployee = {
-            docType: 'employee',
-            name,
-            startDate,
-            organizationId,
-            active: true,
-            archived: false,
-            tier: 'Good Standing'
-        };
-        await db.put(newEmployee);
+        try {
+            const rawEmployee = {
+                docType: 'employee',
+                name: name || '',
+                startDate: startDate || new Date().toISOString().split('T')[0],
+                organizationId: organizationId || 'local-org',
+                active: true,
+                archived: false,
+                tier: 'Good Standing'
+            };
+
+            const newEmployee = deepSanitize(rawEmployee);
+            console.log('Adding employee (sanitized):', newEmployee);
+
+            // Optimistic Update
+            const tempId = 'temp-' + Date.now();
+            setData(prev => ({
+                ...prev,
+                employees: [...prev.employees, { ...newEmployee, _id: tempId, id: tempId, currentPoints: data.settings.startingPoints }]
+            }));
+
+            const res = await db.put(newEmployee);
+            console.log('Employee added successfully, result:', res);
+        } catch (error) {
+            console.error('Failed to add employee:', error);
+            alert('Failed to add employee. See console for details.');
+            // Optionally revert state here if needed, but next live query will fix it
+        }
     };
 
     const addViolation = async (employeeId, type, date, pointsDeducted, shift = 'AM') => {
-        const newViolation = {
-            docType: 'violation',
-            employeeId,
-            type, // Keep 'type' as is for UI compatibility
-            violationType: type, // Redundant but safe
-            date,
-            shift,
-            pointsDeducted,
-            organizationId
-        };
-        await db.put(newViolation);
+        try {
+            const rawViolation = {
+                docType: 'violation',
+                employeeId,
+                type, // Keep 'type' as is for UI compatibility
+                violationType: type, // Redundant but safe
+                date,
+                shift,
+                pointsDeducted,
+                organizationId
+            };
+            const newViolation = deepSanitize(rawViolation);
+
+            // Optimistic Update
+            const tempId = 'temp-' + Date.now();
+            const optimisticViolation = { ...newViolation, _id: tempId, id: tempId };
+
+            setData(prev => {
+                const updatedViolations = [...prev.violations, optimisticViolation];
+
+                // Recalculate points for the specific employee
+                const employeeIndex = prev.employees.findIndex(e => e.id === employeeId);
+                let updatedEmployees = prev.employees;
+
+                if (employeeIndex !== -1) {
+                    const employee = prev.employees[employeeIndex];
+                    const employeeViolations = updatedViolations.filter(v => v.employeeId === employeeId);
+
+                    const currentQuarterKey = getQuarterKey();
+                    const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
+
+                    const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, prev.settings);
+
+                    const currentQuarterViolations = employeeViolations.filter(v => {
+                        const vDate = new Date(v.date);
+                        return vDate >= qStart && vDate <= qEnd;
+                    });
+
+                    const currentPoints = calculateCurrentPoints(
+                        startingPoints,
+                        currentQuarterViolations,
+                        prev.settings.violationPenalties
+                    );
+
+                    updatedEmployees = [...prev.employees];
+                    updatedEmployees[employeeIndex] = { ...employee, currentPoints };
+                }
+
+                return {
+                    ...prev,
+                    violations: updatedViolations,
+                    employees: updatedEmployees
+                };
+            });
+
+            await db.put(newViolation);
+        } catch (error) {
+            console.error('Failed to add violation:', error);
+            alert('Failed to add violation. See console for details.');
+        }
     };
 
     const updateViolation = async (updatedViolation) => {
         // Ensure docType is preserved
-        await db.put({ ...updatedViolation, docType: 'violation', _id: updatedViolation.id });
+        const sanitized = deepSanitize({ ...updatedViolation, docType: 'violation', _id: updatedViolation.id });
+
+        // Optimistic Update
+        setData(prev => {
+            const updatedViolations = prev.violations.map(v => v.id === updatedViolation.id ? sanitized : v);
+
+            // Recalculate points for the specific employee
+            const employeeId = updatedViolation.employeeId;
+            const employeeIndex = prev.employees.findIndex(e => e.id === employeeId);
+            let updatedEmployees = prev.employees;
+
+            if (employeeIndex !== -1) {
+                const employee = prev.employees[employeeIndex];
+                const employeeViolations = updatedViolations.filter(v => v.employeeId === employeeId);
+
+                const currentQuarterKey = getQuarterKey();
+                const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
+
+                const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, prev.settings);
+
+                const currentQuarterViolations = employeeViolations.filter(v => {
+                    const vDate = new Date(v.date);
+                    return vDate >= qStart && vDate <= qEnd;
+                });
+
+                const currentPoints = calculateCurrentPoints(
+                    startingPoints,
+                    currentQuarterViolations,
+                    prev.settings.violationPenalties
+                );
+
+                updatedEmployees = [...prev.employees];
+                updatedEmployees[employeeIndex] = { ...employee, currentPoints };
+            }
+
+            return {
+                ...prev,
+                violations: updatedViolations,
+                employees: updatedEmployees
+            };
+        });
+
+        await db.put(sanitized);
     };
 
     const deleteViolation = async (violationId) => {
+        // Optimistic Update
+        setData(prev => {
+            const violationToDelete = prev.violations.find(v => v.id === violationId);
+            const updatedViolations = prev.violations.filter(v => v.id !== violationId);
+
+            let updatedEmployees = prev.employees;
+            if (violationToDelete) {
+                const employeeId = violationToDelete.employeeId;
+                const employeeIndex = prev.employees.findIndex(e => e.id === employeeId);
+
+                if (employeeIndex !== -1) {
+                    const employee = prev.employees[employeeIndex];
+                    const employeeViolations = updatedViolations.filter(v => v.employeeId === employeeId);
+
+                    const currentQuarterKey = getQuarterKey();
+                    const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
+
+                    const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, prev.settings);
+
+                    const currentQuarterViolations = employeeViolations.filter(v => {
+                        const vDate = new Date(v.date);
+                        return vDate >= qStart && vDate <= qEnd;
+                    });
+
+                    const currentPoints = calculateCurrentPoints(
+                        startingPoints,
+                        currentQuarterViolations,
+                        prev.settings.violationPenalties
+                    );
+
+                    updatedEmployees = [...prev.employees];
+                    updatedEmployees[employeeIndex] = { ...employee, currentPoints };
+                }
+            }
+
+            return {
+                ...prev,
+                violations: updatedViolations,
+                employees: updatedEmployees
+            };
+        });
         await db.del(violationId);
     };
 
@@ -225,17 +402,38 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
         // Check if already exists
         const exists = data.issuedDAs.includes(daKey);
         if (!exists) {
+            // Optimistic Update
+            setData(prev => ({
+                ...prev,
+                issuedDAs: [...prev.issuedDAs, daKey]
+            }));
             await db.put({ docType: 'issuedDA', daKey });
         }
     };
 
     const updateSettings = async (newSettings) => {
         const currentSettingsDoc = allDocs.docs.find(d => d.docType === 'settings') || { docType: 'settings' };
-        await db.put({ ...currentSettingsDoc, ...newSettings, docType: 'settings' });
+        const sanitized = deepSanitize({ ...currentSettingsDoc, ...newSettings, docType: 'settings' });
+
+        // Optimistic Update
+        setData(prev => ({
+            ...prev,
+            settings: { ...prev.settings, ...newSettings }
+        }));
+
+        await db.put(sanitized);
     };
 
     const updateEmployee = async (updatedEmployee) => {
-        await db.put({ ...updatedEmployee, docType: 'employee', _id: updatedEmployee.id });
+        const sanitized = deepSanitize({ ...updatedEmployee, docType: 'employee', _id: updatedEmployee.id });
+
+        // Optimistic Update
+        setData(prev => ({
+            ...prev,
+            employees: prev.employees.map(e => e.id === updatedEmployee.id ? { ...e, ...sanitized } : e)
+        }));
+
+        await db.put(sanitized);
     };
 
     const deleteEmployee = async (employeeId) => {
@@ -293,9 +491,6 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
         reader.onload = async (e) => {
             try {
                 const imported = JSON.parse(e.target.result);
-                // Clear existing? Or merge?
-                // Original code: localStorage.setItem(..., JSON.stringify(mergedData));
-                // We should probably merge.
 
                 if (imported.employees) {
                     for (const emp of imported.employees) {
@@ -310,7 +505,6 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
                 if (imported.settings) {
                     await updateSettings(imported.settings);
                 }
-                // ... handle DAs
                 window.location.reload();
             } catch (err) {
                 console.error("Import failed", err);

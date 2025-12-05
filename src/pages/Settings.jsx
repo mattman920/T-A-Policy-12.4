@@ -36,6 +36,29 @@ const Settings = () => {
         e.target.value = null;
     };
 
+    const handleResetDatabase = async () => {
+        if (!confirm('WARNING: This will completely WIPE the local database and localStorage. Only do this if you are experiencing synchronization errors. Are you sure?')) {
+            return;
+        }
+
+        try {
+            // Clear IndexedDB
+            const dbs = await window.indexedDB.databases();
+            for (const db of dbs) {
+                window.indexedDB.deleteDatabase(db.name);
+            }
+
+            // Clear LocalStorage (often holds Fireproof keys/identity)
+            localStorage.clear();
+
+            alert('Database and LocalStorage cleared. Reloading...');
+            window.location.reload();
+        } catch (error) {
+            console.error('Error clearing database:', error);
+            alert('Failed to clear database. Please try manually in DevTools.');
+        }
+    };
+
     const sectionStyle = {
         backgroundColor: 'var(--bg-secondary)',
         padding: '2rem',
@@ -448,7 +471,7 @@ const Settings = () => {
                     </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                     <button
                         onClick={exportDatabase}
                         style={{
@@ -463,7 +486,8 @@ const Settings = () => {
                             backgroundColor: 'var(--bg-secondary)',
                             cursor: 'pointer',
                             color: 'var(--text-primary)',
-                            fontWeight: '500'
+                            fontWeight: '500',
+                            minWidth: '200px'
                         }}
                     >
                         <Download size={20} /> Export Backup
@@ -483,10 +507,32 @@ const Settings = () => {
                             backgroundColor: 'var(--bg-secondary)',
                             cursor: 'pointer',
                             color: 'var(--text-primary)',
-                            fontWeight: '500'
+                            fontWeight: '500',
+                            minWidth: '200px'
                         }}
                     >
                         <Upload size={20} /> Restore Backup
+                    </button>
+
+                    <button
+                        onClick={handleResetDatabase}
+                        style={{
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.5rem',
+                            padding: '1rem',
+                            borderRadius: 'var(--radius-md)',
+                            border: '1px solid var(--accent-danger)',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            cursor: 'pointer',
+                            color: 'var(--accent-danger)',
+                            fontWeight: '500',
+                            minWidth: '200px'
+                        }}
+                    >
+                        <RotateCcw size={20} /> Reset Database
                     </button>
                     <input
                         type="file"

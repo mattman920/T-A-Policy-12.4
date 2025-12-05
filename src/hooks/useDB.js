@@ -1,4 +1,4 @@
-import { useFireproof } from '@fireproof/react';
+import { useFireproof } from 'use-fireproof';
 import { connect } from '@fireproof/netlify';
 
 export function useDB() {
@@ -9,7 +9,8 @@ export function useDB() {
     if (existingDb) {
         dbName = existingDb;
     } else {
-        dbName = Math.random().toString(36).substring(2, 15);
+        // Use a fixed database name for persistence
+        dbName = 'attendance-tracker-v3';
         const newUrl = new URL(window.location);
         newUrl.searchParams.set('db', dbName);
         window.history.replaceState(null, '', newUrl.toString());
@@ -18,7 +19,12 @@ export function useDB() {
     const { database, useLiveQuery } = useFireproof(dbName);
 
     try {
-        connect(database);
+        let origin = window.location.origin;
+        if (window.location.hostname === 'localhost') {
+            origin = 'http://localhost:8888';
+        }
+        const netlifyUrl = origin.replace(/^http/, 'netlify');
+        connect(database, '', netlifyUrl);
     } catch (error) {
         console.warn('Fireproof connect failed:', error);
     }

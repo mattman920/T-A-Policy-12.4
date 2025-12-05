@@ -1,0 +1,80 @@
+{
+  "name": "@fireproof/core",
+  "version": "0.19.118",
+  "description": "Live database for the web.",
+  "type": "module",
+  "module": "./index.js",
+  "main": "./index.cjs",
+  "browser": "./index.global.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": "./index.cjs",
+      "script": "./index.global.js",
+      "types": "./index.d.ts"
+    },
+    "./node": {
+      "import": "./index.js",
+      "require": "./index.cjs",
+      "script": "./index.global.js",
+      "types": "./index.d.ts"
+    },
+    "./web": {
+      "import": "./web/index.js",
+      "require": "./web/index.cjs",
+      "script": "./web/index.global.js",
+      "types": "./web/index.d.ts"
+    },
+    "./react": {
+      "import": "./react/index.js",
+      "require": "./react/index.cjs",
+      "script": "./react/index.global.js",
+      "types": "./react/index.d.ts"
+    }
+  },
+  "keywords": [
+    "database",
+    "JSON",
+    "document",
+    "IPLD",
+    "CID",
+    "IPFS"
+  ],
+  "contributors": [
+    "J Chris Anderson",
+    "Alan Shaw",
+    "Travis Vachon",
+    "Mikeal Rogers",
+    "Meno Abels"
+  ],
+  "author": "J Chris Anderson",
+  "license": "Apache-2.0 OR MIT",
+  "homepage": "https://use-fireproof.com",
+  "gptdoc": "import { fireproof } from 'use-fireproof; const db = fireproof('app-db-name'); const ok = await db.put({ anyField: ['any','json'] }); const doc = await db.get(ok.id); await db.del(doc._id); useEffect(()=> db.subscribe(updateReactStateAsyncFn), []); const result = await db.query('anyField', {range : ['a', 'z']}); result.rows.map(({ key }) => key);",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fireproof-storage/fireproof.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fireproof-storage/fireproof/issues"
+  },
+  "devDependencies": {},
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "dependencies": {
+    "@adviser/cement": "^0.2.41",
+    "@fireproof/vendor": "^1.0.0",
+    "@ipld/unixfs": "^3.0.0",
+    "multiformats": "^13.3.1",
+    "charwise": "^3.0.1",
+    "prolly-trees": "^1.0.4",
+    "idb": "^8.0.0",
+    "memfs": "^4.15.0",
+    "p-limit": "^6.1.0",
+    "p-map": "^7.0.3",
+    "p-retry": "^6.2.1"
+  },
+  "scripts": {}
+}
