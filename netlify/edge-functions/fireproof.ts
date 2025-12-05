@@ -1,3 +1,3 @@
-import { handleRequest } from '@fireproof/netlify'
+import handler from '@fireproof/netlify';
 
-export default handleRequest
+export default handler;
