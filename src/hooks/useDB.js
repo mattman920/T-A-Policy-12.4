@@ -23,8 +23,10 @@ export function useDB() {
         if (window.location.hostname === 'localhost') {
             origin = 'http://localhost:8888';
         }
-        const netlifyUrl = origin.replace(/^http/, 'netlify');
+        const netlifyUrl = origin.replace(/^https?/, 'netlify');
+        console.log('Fireproof connecting to:', netlifyUrl, 'with db:', dbName);
         connect(database, '', netlifyUrl);
+        console.log('Fireproof connect called successfully');
     } catch (error) {
         console.warn('Fireproof connect failed:', error);
     }
