@@ -212,6 +212,17 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
         return obj;
     };
 
+    // Helper to safely put data to Fireproof
+    const safePut = async (doc) => {
+        try {
+            const sanitized = deepSanitize(doc);
+            return await db.put(sanitized);
+        } catch (error) {
+            console.error('Fireproof put failed:', error, doc);
+            throw error;
+        }
+    };
+
     const addEmployee = async (name, startDate) => {
         try {
             const rawEmployee = {
@@ -234,7 +245,7 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
                 employees: [...prev.employees, { ...newEmployee, _id: tempId, id: tempId, currentPoints: data.settings.startingPoints }]
             }));
 
-            const res = await db.put(newEmployee);
+            const res = await safePut(newEmployee);
             console.log('Employee added successfully, result:', res);
         } catch (error) {
             console.error('Failed to add employee:', error);
@@ -299,7 +310,7 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
                 };
             });
 
-            await db.put(newViolation);
+            await safePut(newViolation);
         } catch (error) {
             console.error('Failed to add violation:', error);
             alert('Failed to add violation. See console for details.');
@@ -350,7 +361,7 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
             };
         });
 
-        await db.put(sanitized);
+        await safePut(sanitized);
     };
 
     const deleteViolation = async (violationId) => {
@@ -407,7 +418,7 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
                 ...prev,
                 issuedDAs: [...prev.issuedDAs, daKey]
             }));
-            await db.put({ docType: 'issuedDA', daKey });
+            await safePut({ docType: 'issuedDA', daKey });
         }
     };
 
@@ -421,7 +432,7 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
             settings: { ...prev.settings, ...newSettings }
         }));
 
-        await db.put(sanitized);
+        await safePut(sanitized);
     };
 
     const updateEmployee = async (updatedEmployee) => {
@@ -433,7 +444,7 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
             employees: prev.employees.map(e => e.id === updatedEmployee.id ? { ...e, ...sanitized } : e)
         }));
 
-        await db.put(sanitized);
+        await safePut(sanitized);
     };
 
     const deleteEmployee = async (employeeId) => {
