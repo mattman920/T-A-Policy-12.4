@@ -23,8 +23,51 @@ console.error = (...args) => {
   originalConsoleError.apply(console, args);
 };
 
-// Global error handler for other critical issues (optional, keeping it simple for now)
-// Removed previous aggressive 'block not in reader' handler as per user request to just suppress logs.
+// Global error handler for "Missing linked block" (CRDT/Fireproof corruption)
+window.addEventListener('unhandledrejection', async (event) => {
+  const reason = event.reason;
+  // Check if it's the specific CRDT error
+  if (reason && (
+    (reason.message && reason.message.includes('Missing linked block')) ||
+    (typeof reason === 'string' && reason.includes('Missing linked block')) ||
+    (reason.msg === 'Missing linked block')
+  )) {
+    console.error('CRITICAL: Data corruption detected (Missing linked block). Initiating auto-recovery...');
+
+    // Prevent infinite reload loops
+    const reloadCount = parseInt(localStorage.getItem('crdt_recovery_attempts') || '0');
+    if (reloadCount > 3) {
+      console.error('Recovery failed after 3 attempts. Please contact support.');
+      alert('Application data is corrupted and could not be recovered automatically. Please clear your browser data for this site.');
+      localStorage.removeItem('crdt_recovery_attempts');
+      return;
+    }
+
+    localStorage.setItem('crdt_recovery_attempts', (reloadCount + 1).toString());
+
+    try {
+      // Attempt to clear Fireproof databases
+      const dbs = await window.indexedDB.databases();
+      for (const db of dbs) {
+        if (db.name && (db.name.includes('fireproof') || db.name.includes('attendance'))) {
+          console.log(`Deleting database: ${db.name}`);
+          window.indexedDB.deleteDatabase(db.name);
+        }
+      }
+    } catch (e) {
+      console.error('Error clearing databases:', e);
+    }
+
+    // Reload to resync
+    console.log('Reloading application...');
+    window.location.reload();
+  }
+});
+
+// Reset recovery counter on successful load (after 10 seconds)
+setTimeout(() => {
+  localStorage.removeItem('crdt_recovery_attempts');
+}, 10000);
 
 import App from './App.jsx'
 import { AuthProvider } from './contexts/AuthContext'

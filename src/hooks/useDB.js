@@ -65,7 +65,7 @@ export function useDB() {
                         setTimeout(checkData, 1000);
                     }
                 };
-                checkData();
+                checkData().catch(e => console.error('Error in checkData:', e));
             } catch (error) {
                 console.error('Fireproof connect failed:', error);
                 setConnected(true); // Allow to proceed even if connect fails (offline mode)
