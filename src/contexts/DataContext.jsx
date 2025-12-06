@@ -607,7 +607,6 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                     console.log('Starting import...');
 
                     // 1. Fetch Live Context from DB (Directly) to ensure Real IDs
-                    // We avoid using 'data.employees' state to prevent linking to temporary optimistic IDs
                     const allDocsResult = await db.allDocs();
                     const dbDocs = allDocsResult.rows.map(r => r.value);
                     const dbEmployees = dbDocs.filter(d => d.docType === 'employee');
@@ -631,10 +630,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                         });
                     }
 
-                    // Helper for yielding to UI
-                    const yieldToUI = () => new Promise(r => setTimeout(r, 0));
-
-                    // 3. Process Violations
+                    // 3. Process Violations with Batching
                     let addedCount = 0;
                     let skippedCount = 0;
 
@@ -647,26 +643,23 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                             existingSignatures.add(`${v.employeeId}|${v.date}|${v.type}`);
                         });
 
-                        let count = 0;
+                        const violationsToImport = [];
+
+                        // Filter and Prepare Data First
                         for (const v of imported.violations) {
-                            // Step A: Resolve Name
                             const legacyId = v.employeeId;
                             const name = legacyJsonMap.get(legacyId);
 
                             if (name) {
-                                // Step B: Check Existence in Live Context
                                 const normalizedName = name.toLowerCase();
                                 const liveAppUserId = liveContextMap.get(normalizedName);
 
                                 if (liveAppUserId) {
-                                    // Step C: Filter & Insert
-                                    // Check for duplicates
-                                    const dateStr = v.date; // Assuming YYYY-MM-DD from JSON
+                                    const dateStr = v.date;
                                     const signature = `${liveAppUserId}|${dateStr}|${v.type}`;
 
                                     if (!existingSignatures.has(signature)) {
-                                        // Insert
-                                        const newViolation = {
+                                        violationsToImport.push({
                                             docType: 'violation',
                                             employeeId: liveAppUserId,
                                             type: v.type,
@@ -675,27 +668,39 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                                             shift: v.shift || 'AM',
                                             pointsDeducted: v.pointsDeducted,
                                             organizationId: organizationId || 'local-org'
-                                        };
-
-                                        await safePut(newViolation);
+                                        });
                                         existingSignatures.add(signature);
-                                        addedCount++;
                                     } else {
-                                        // Duplicate
                                         skippedCount++;
                                     }
                                 } else {
-                                    // Name not found in live DB
-                                    console.warn(`Skipping violation for ${name}: Employee not found in active DB.`);
                                     skippedCount++;
                                 }
                             } else {
-                                // Name null/empty in JSON
                                 skippedCount++;
                             }
+                        }
 
-                            count++;
-                            if (count % 20 === 0) await yieldToUI();
+                        // Batch Insert
+                        const BATCH_SIZE = 50;
+                        const batches = [];
+                        for (let i = 0; i < violationsToImport.length; i += BATCH_SIZE) {
+                            batches.push(violationsToImport.slice(i, i + BATCH_SIZE));
+                        }
+
+                        console.log(`Prepared ${violationsToImport.length} violations for import in ${batches.length} batches.`);
+
+                        for (let i = 0; i < batches.length; i++) {
+                            const batch = batches[i];
+                            setLoadingMessage(`Importing batch ${i + 1} of ${batches.length}...`);
+
+                            // Insert batch in parallel
+                            await Promise.all(batch.map(doc => safePut(doc)));
+
+                            addedCount += batch.length;
+
+                            // Small delay to let DB breathe and UI update
+                            await new Promise(r => setTimeout(r, 100));
                         }
                     }
 

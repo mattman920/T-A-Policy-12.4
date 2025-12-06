@@ -1,7 +1,7 @@
 // Native fetch is available in Node.js 18+
 
 async function wipeServerData() {
-    const dbName = 'attendance-tracker-v6';
+    const dbName = 'attendance-tracker-v7';
     const baseUrl = 'https://timeattendancetracker.netlify.app';
     const url = `${baseUrl}/fireproof?meta=${dbName}`;
 
