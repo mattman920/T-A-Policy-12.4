@@ -13,7 +13,7 @@ export function useDB() {
         dbName = existingDb;
     } else {
         // Use a fixed database name for persistence
-        dbName = 'attendance-tracker-v8';
+        dbName = 'attendance-tracker-v9';
         const newUrl = new URL(window.location);
         newUrl.searchParams.set('db', dbName);
         window.history.replaceState(null, '', newUrl.toString());

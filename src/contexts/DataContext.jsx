@@ -682,9 +682,9 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                             }
                         }
 
-                        // Batch Insert - SAFE IMPORT MODE
-                        // CHUNK_SIZE = 5 + 800ms delay prevents Compaction/Sync race conditions
-                        const BATCH_SIZE = 5;
+                        // Batch Insert - ULTRA-SAFE IMPORT MODE
+                        // CHUNK_SIZE = 2 + 2000ms delay ensures Data Integrity & Sync
+                        const BATCH_SIZE = 2;
                         const batches = [];
                         for (let i = 0; i < violationsToImport.length; i += BATCH_SIZE) {
                             batches.push(violationsToImport.slice(i, i + BATCH_SIZE));
@@ -694,7 +694,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
 
                         for (let i = 0; i < batches.length; i++) {
                             const batch = batches[i];
-                            setLoadingMessage(`Importing batch ${i + 1} of ${batches.length}...`);
+                            setLoadingMessage(`Importing safe batch ${i + 1} of ${batches.length}...`);
 
                             // 1. Insert batch in parallel
                             await Promise.all(batch.map(doc => safePut(doc)));
@@ -702,9 +702,9 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                             addedCount += batch.length;
 
                             // 2. CRITICAL: Artificial Delay for Compaction/Sync Handshake
-                            // We yield 800ms to allow Fireproof to compact blocks and Netlify Sync
+                            // We yield 2000ms to allow Fireproof to compact blocks and Netlify Sync
                             // to pick them up before we generate more.
-                            await new Promise(r => setTimeout(r, 800));
+                            await new Promise(r => setTimeout(r, 2000));
                         }
                     }
 
