@@ -339,17 +339,18 @@ const ReportsGenerator = () => {
 
                     } else if (tardyPenalties[type]) {
                         const date = parseDate(v.date);
-                        const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+                        const quarter = Math.floor(date.getMonth() / 3) + 1;
+                        const quarterKey = `${date.getFullYear()}-Q${quarter}`;
 
-                        if (!tardyCountsByMonth[monthKey]) tardyCountsByMonth[monthKey] = {};
-                        if (!tardyCountsByMonth[monthKey][type]) tardyCountsByMonth[monthKey][type] = 0;
+                        if (!tardyCountsByMonth[quarterKey]) tardyCountsByMonth[quarterKey] = {};
+                        if (!tardyCountsByMonth[quarterKey][type]) tardyCountsByMonth[quarterKey][type] = 0;
 
-                        const count = tardyCountsByMonth[monthKey][type];
+                        const count = tardyCountsByMonth[quarterKey][type];
                         const penaltyList = tardyPenalties[type];
                         const penalty = penaltyList[Math.min(count, penaltyList.length - 1)];
 
                         calculatedPointsMap[v._id] = penalty;
-                        tardyCountsByMonth[monthKey][type]++;
+                        tardyCountsByMonth[quarterKey][type]++;
                     } else {
                         // Fallback for other types or unknown types
                         calculatedPointsMap[v._id] = v.pointsDeducted || 0;

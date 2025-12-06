@@ -133,7 +133,9 @@ export function calculateDeductions(violations, penalties = null) {
     let totalDeduction = 0;
 
     // Filter out covered callouts BEFORE grouping or calculating
-    const activeViolations = violations.filter(v => !v.shiftCovered);
+    // Only respect shiftCovered if it's actually a Callout. 
+    // This prevents bugs where a covered Callout is changed to Tardy but keeps the flag.
+    const activeViolations = violations.filter(v => !v.shiftCovered || v.type !== VIOLATION_TYPES.CALLOUT);
 
     // First, group consecutive callouts so they count as one instance
     const groupedViolations = groupConsecutiveCallouts(activeViolations);
@@ -158,17 +160,18 @@ export function calculateDeductions(violations, penalties = null) {
             calloutCount++;
         } else if (tardyPenalties[type]) {
             const date = parseDate(v.date);
-            const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+            const quarter = Math.floor(date.getMonth() / 3) + 1;
+            const quarterKey = `${date.getFullYear()}-Q${quarter}`;
 
-            if (!tardyCountsByMonth[monthKey]) tardyCountsByMonth[monthKey] = {};
-            if (!tardyCountsByMonth[monthKey][type]) tardyCountsByMonth[monthKey][type] = 0;
+            if (!tardyCountsByMonth[quarterKey]) tardyCountsByMonth[quarterKey] = {};
+            if (!tardyCountsByMonth[quarterKey][type]) tardyCountsByMonth[quarterKey][type] = 0;
 
-            const count = tardyCountsByMonth[monthKey][type];
+            const count = tardyCountsByMonth[quarterKey][type];
             const penaltyList = tardyPenalties[type];
             const penalty = penaltyList[Math.min(count, penaltyList.length - 1)];
 
             totalDeduction += penalty;
-            tardyCountsByMonth[monthKey][type]++;
+            tardyCountsByMonth[quarterKey][type]++;
         }
     });
 

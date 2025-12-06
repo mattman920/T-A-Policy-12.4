@@ -129,15 +129,6 @@ export function groupConsecutiveCallouts(violations) {
 export function calculateDeductions(violations, penalties = null) {
     const calloutPenalties = penalties?.callout || DEFAULT_CALLOUT_PENALTIES;
     const tardyPenalties = penalties?.tardy || DEFAULT_TARDY_PENALTIES;
-
-    let totalDeduction = 0;
-
-    // Filter out covered callouts BEFORE grouping or calculating
-    const activeViolations = violations.filter(v => !v.shiftCovered);
-
-    // First, group consecutive callouts so they count as one instance
-    const groupedViolations = groupConsecutiveCallouts(activeViolations);
-
     // Now sort again just to be safe, though grouping preserves order
     const sortedViolations = [...groupedViolations].sort((a, b) => parseDate(a.date) - parseDate(b.date));
 
