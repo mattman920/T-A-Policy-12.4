@@ -99,13 +99,13 @@ export default async (req: Request) => {
                             if (parents) {
                                 for (const p of parents) {
                                     allParents.push(p.toString());
-                                    void meta.delete(`${metaDb}/${p}`);
+                                    // void meta.delete(`${metaDb}/${p}`); // DISABLED: Preserving history for sync
                                 }
                             }
                             return { cid: blob.key.split("/")[1], data, parents };
                         })
                     )
-                ).filter((entry) => entry.data !== null && !allParents.includes(entry.cid));
+                ).filter((entry) => entry.data !== null);
                 return new Response(JSON.stringify(entries), { status: 200, headers });
             }
         } else if (req.method === "DELETE") {
