@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS = {
 export function DataProvider({ children }) {
     const { organizationId } = useAuth();
     const isOfflineMode = true;
-    const { db, useLiveQuery } = useDB();
+    const { db, useLiveQuery, connected } = useDB();
 
     // Live queries for different data types
     // Live queries for different data types
@@ -112,6 +112,7 @@ export function DataProvider({ children }) {
         <DataProviderContent
             db={db}
             useLiveQuery={useLiveQuery}
+            connected={connected}
             organizationId={organizationId}
             isOfflineMode={isOfflineMode}
             children={children}
@@ -131,7 +132,7 @@ const mapAllDocs = (doc) => {
 };
 
 // Split into inner component to use hooks properly
-function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, children }) {
+function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOfflineMode, children }) {
     // Index by docType for efficiency
     const allDocs = useLiveQuery(mapAllDocs);
 
@@ -144,6 +145,8 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
     });
 
     const [loading, setLoading] = useState(true);
+    const [loadingProgress, setLoadingProgress] = useState(0);
+    const [loadingMessage, setLoadingMessage] = useState('Initializing...');
 
     const getQuarterKey = (date = new Date()) => {
         const year = date.getFullYear();
@@ -189,6 +192,11 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
 
     // 1. Live Query Update & Migration
     useEffect(() => {
+        if (connected) {
+            setLoadingProgress(prev => Math.max(prev, 50));
+            setLoadingMessage('Synchronizing data...');
+        }
+
         if (allDocs?.docs && allDocs.docs.length > 0) {
             // Migration: Fix "Callout" -> "Call Out"
             const violationsToFix = allDocs.docs.filter(d => d.docType === 'violation' && d.type === 'Callout');
@@ -200,15 +208,23 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
             }
 
             processDocs(allDocs.docs);
+            setLoadingProgress(100);
+            setLoadingMessage('Ready');
+            // Small delay to show 100%
+            setTimeout(() => setLoading(false), 500);
         } else if (allDocs?.error) {
             console.error("DataContext: Live query error:", allDocs.error);
+            // Don't hang on error, but maybe show alert?
+            setLoading(false);
         }
-    }, [allDocs, processDocs]);
+    }, [allDocs, processDocs, connected]);
 
     // 2. Manual Fetch Fallback (for initial load reliability)
     useEffect(() => {
         let attempts = 0;
         const fetchManual = async () => {
+            if (!connected) return; // Wait for connection first
+
             try {
                 const result = await db.allDocs();
                 if (result.rows.length > 0) {
@@ -216,15 +232,18 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
                     if (!allDocs?.docs || allDocs.docs.length === 0) {
                         const docs = result.rows.map(r => r.value);
                         processDocs(docs);
+                        setLoadingProgress(100);
+                        setTimeout(() => setLoading(false), 500);
                     }
                 } else {
                     // If both are empty, we are truly empty, but maybe sync is slow?
                     if (!allDocs?.docs || allDocs.docs.length === 0) {
-                        if (attempts < 5) {
+                        if (attempts < 10) { // Increased attempts to wait for sync
                             attempts++;
+                            setLoadingProgress(prev => Math.min(prev + 5, 90)); // Fake progress while waiting
                             setTimeout(fetchManual, 1000);
                         } else {
-                            setLoading(false);
+                            setLoading(false); // Give up and show empty state
                         }
                     }
                 }
@@ -233,8 +252,22 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
                 setLoading(false);
             }
         };
-        fetchManual();
-    }, [db, allDocs, processDocs]);
+
+        // Start manual fetch loop only after connected
+        if (connected) {
+            fetchManual();
+        } else {
+            // Simulate connection progress
+            const interval = setInterval(() => {
+                setLoadingProgress(prev => {
+                    if (prev < 40) return prev + 5;
+                    return prev;
+                });
+                setLoadingMessage('Connecting to database...');
+            }, 500);
+            return () => clearInterval(interval);
+        }
+    }, [db, allDocs, processDocs, connected]);
 
     console.log('DataProvider: organizationId', organizationId);
 
@@ -724,27 +757,32 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
                 justifyContent: 'center',
                 alignItems: 'center',
                 height: '100vh',
-                backgroundColor: '#1f2937', // Dark gray background
+                backgroundColor: '#000000', // Black background
                 color: '#f3f4f6', // Light text
-                fontFamily: 'system-ui, -apple-system, sans-serif'
+                fontFamily: 'system-ui, -apple-system, sans-serif',
+                flexDirection: 'column'
             }}>
-                <div style={{ textAlign: 'center' }}>
-                    <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Loading Attendance Tracker...</h2>
+                <div style={{ textAlign: 'center', width: '300px' }}>
+                    <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>{loadingMessage}</h2>
+
+                    {/* Progress Bar Container */}
                     <div style={{
-                        width: '40px',
-                        height: '40px',
-                        border: '4px solid #374151', // Darker border
-                        borderTop: '4px solid #60a5fa', // Lighter blue for contrast
-                        borderRadius: '50%',
-                        animation: 'spin 1s linear infinite',
-                        margin: '0 auto'
-                    }}></div>
-                    <style>{`
-                        @keyframes spin {
-                            0% { transform: rotate(0deg); }
-                            100% { transform: rotate(360deg); }
-                        }
-                    `}</style>
+                        width: '100%',
+                        height: '10px',
+                        backgroundColor: '#374151', // Darker gray container
+                        borderRadius: '5px',
+                        overflow: 'hidden',
+                        marginBottom: '0.5rem'
+                    }}>
+                        {/* Progress Bar Fill */}
+                        <div style={{
+                            width: `${loadingProgress}%`,
+                            height: '100%',
+                            backgroundColor: '#ef4444', // Red fill
+                            transition: 'width 0.3s ease-in-out'
+                        }}></div>
+                    </div>
+                    <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{loadingProgress}%</div>
                 </div>
             </div>
         );

@@ -1,6 +1,6 @@
 import { useFireproof } from 'use-fireproof';
 import { connect } from '@fireproof/netlify';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { deepSanitize } from '../utils/dataUtils';
 
@@ -23,8 +23,13 @@ export function useDB() {
 
     const connectionRef = useRef(null);
 
+    const [connected, setConnected] = useState(false);
+
     useEffect(() => {
-        if (connectionRef.current === dbName) return;
+        if (connectionRef.current === dbName) {
+            setConnected(true);
+            return;
+        }
 
         const initConnection = async () => {
             try {
@@ -36,6 +41,7 @@ export function useDB() {
                 console.log('Fireproof connecting to:', netlifyUrl, 'with db:', dbName);
                 const connection = await connect(database, dbName, netlifyUrl);
                 connectionRef.current = dbName;
+                setConnected(true);
 
                 // Debug: Check if data is actually in the DB with polling
                 let attempts = 0;
@@ -62,11 +68,13 @@ export function useDB() {
                 checkData();
             } catch (error) {
                 console.error('Fireproof connect failed:', error);
+                setConnected(true); // Allow to proceed even if connect fails (offline mode)
             }
         };
 
         initConnection();
     }, [database, dbName]);
 
-    return { db: database, useLiveQuery };
+    return { db: database, useLiveQuery, connected };
 }
+
