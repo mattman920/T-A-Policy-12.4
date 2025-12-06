@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useContext, useRef } from 'react';
 import { calculateCurrentPoints, calculateQuarterlyStart, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
 import { getCurrentQuarterDates } from '../utils/dateUtils';
 import { deepSanitize } from '../utils/dataUtils';
@@ -187,35 +187,67 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             issuedDAs,
             settings
         });
-        setLoading(false);
+        // Do NOT set loading false here. It must go through checkCompletion.
     }, []);
 
-    // 1. Live Query Update & Migration
+    // Ref to track if minimum time has passed
+    const minTimePassedRef = useRef(false);
+    const dataReadyRef = useRef(false);
+
+    // 1. Fixed 15-second timer & Progress Bar
+    useEffect(() => {
+        const startTime = Date.now();
+        const duration = 15000; // 15 seconds
+
+        const interval = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(Math.floor((elapsed / duration) * 100), 100);
+            setLoadingProgress(progress);
+
+            if (elapsed >= duration) {
+                minTimePassedRef.current = true;
+                checkCompletion();
+                if (progress >= 100) clearInterval(interval);
+            }
+        }, 100);
+
+        return () => clearInterval(interval);
+    }, []);
+
+    const checkCompletion = () => {
+        if (minTimePassedRef.current && dataReadyRef.current) {
+            console.log('Loading complete: 15s passed AND data ready.');
+            setLoading(false);
+        }
+    };
+
+    // 2. Live Query Update
     useEffect(() => {
         if (connected) {
-            setLoadingProgress(prev => Math.max(prev, 50));
-            setLoadingMessage('Synchronizing data...');
+            setLoadingMessage('Loading application data...');
         }
 
-        if (allDocs?.docs && allDocs.docs.length > 0) {
-            // Migration: Fix "Callout" -> "Call Out"
+        if (allDocs?.docs) {
+            // Process data immediately in background
             const violationsToFix = allDocs.docs.filter(d => d.docType === 'violation' && d.type === 'Callout');
             if (violationsToFix.length > 0) {
-                console.log(`Migrating ${violationsToFix.length} violations from 'Callout' to 'Call Out'...`);
                 violationsToFix.forEach(v => {
                     safePut({ ...v, type: 'Call Out', violationType: 'Call Out' });
                 });
             }
 
             processDocs(allDocs.docs);
-            setLoadingProgress(100);
-            setLoadingMessage('Ready');
-            // Small delay to show 100%
-            setTimeout(() => setLoading(false), 500);
+
+            // Mark data as ready
+            dataReadyRef.current = true;
+            checkCompletion();
+
         } else if (allDocs?.error) {
             console.error("DataContext: Live query error:", allDocs.error);
-            // Don't hang on error, but maybe show alert?
-            setLoading(false);
+            // If error, we might still want to let them in after 15s? 
+            // For now, treat error as "ready" so we don't hang forever if DB fails
+            dataReadyRef.current = true;
+            checkCompletion();
         }
     }, [allDocs, processDocs, connected]);
 
@@ -232,8 +264,8 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                     if (!allDocs?.docs || allDocs.docs.length === 0) {
                         const docs = result.rows.map(r => r.value);
                         processDocs(docs);
-                        setLoadingProgress(100);
-                        setTimeout(() => setLoading(false), 500);
+                        dataReadyRef.current = true;
+                        checkCompletion();
                     }
                 } else {
                     // If both are empty, we are truly empty, but maybe sync is slow?
