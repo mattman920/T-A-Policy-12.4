@@ -295,8 +295,23 @@ const ReportsGenerator = () => {
                 // We need to process them in order to count correctly.
                 // But we also need to handle the "consecutive" logic which looks backwards.
 
+                let currentQuarterKey = null;
+
                 for (let i = 0; i < empViolations.length; i++) {
                     const v = empViolations[i];
+
+                    // Determine Quarter for this violation
+                    const vDate = parseDate(v.date);
+                    const vYear = vDate.getFullYear();
+                    const vMonth = vDate.getMonth(); // 0-11
+                    const vQ = Math.floor(vMonth / 3) + 1;
+                    const vQuarterKey = `${vYear}-Q${vQ}`;
+
+                    // Reset counters if quarter changes
+                    if (vQuarterKey !== currentQuarterKey) {
+                        calloutCount = 0;
+                        currentQuarterKey = vQuarterKey;
+                    }
 
                     // Normalize type
                     const type = v.type === 'Callout' ? VIOLATION_TYPES.CALLOUT : v.type;

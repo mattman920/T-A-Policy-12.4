@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Modal from './Modal';
 import { useData } from '../contexts/DataContext';
-import { calculateCurrentPoints, determineTier, calculateQuarterlyStart } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, TIERS } from '../utils/pointCalculator';
 import { getQuarterKey } from '../utils/dateUtils';
 import Papa from 'papaparse';
 import { jsPDF } from 'jspdf';
@@ -119,12 +119,23 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                 const potentialEMD = scheduledShifts * 5;
 
                 // B. Deduction
+                // Use determineTier to get the tier effectively used in the Scorecard
+                const tier = determineTier(currentPoints, data.settings.daSettings);
+
                 let deductionPercent = 0;
-                if (currentPoints >= 125) deductionPercent = 0;
-                else if (currentPoints >= 100) deductionPercent = 0.25;
-                else if (currentPoints >= 75) deductionPercent = 0.50;
-                else if (currentPoints >= 50) deductionPercent = 0.75;
-                else deductionPercent = 1.00;
+
+                if (tier.name === TIERS.GOOD.name) {
+                    deductionPercent = 0;
+                } else if (tier.name === TIERS.EDUCATIONAL.name) {
+                    deductionPercent = 0.25;
+                } else if (tier.name === TIERS.COACHING.name) {
+                    deductionPercent = 0.50;
+                } else if (tier.name === TIERS.SEVERE.name) {
+                    deductionPercent = 0.75;
+                } else {
+                    // Final, Termination, or fallback
+                    deductionPercent = 1.00;
+                }
 
                 // C. Bonus (Reward Tiers)
                 let bonusPercent = 0;
