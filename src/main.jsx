@@ -36,10 +36,13 @@ window.addEventListener('unhandledrejection', async (event) => {
 
     // Prevent infinite reload loops
     const reloadCount = parseInt(localStorage.getItem('crdt_recovery_attempts') || '0');
-    if (reloadCount > 3) {
-      console.error('Recovery failed after 3 attempts. Please contact support.');
-      alert('Application data is corrupted and could not be recovered automatically. Please clear your browser data for this site.');
-      localStorage.removeItem('crdt_recovery_attempts');
+
+    // If we have already tried twice, stop.
+    if (reloadCount >= 2) {
+      console.error(`Recovery failed after ${reloadCount} attempts. Stopping auto-reload.`);
+      alert('Application data appears corrupted and auto-recovery failed. Please clear your browser data for this site or contact support.');
+      // Do NOT clear the counter here immediately, so subsequent errors also get blocked.
+      // But we should probably clear it eventually or let the user clear it.
       return;
     }
 
@@ -64,10 +67,11 @@ window.addEventListener('unhandledrejection', async (event) => {
   }
 });
 
-// Reset recovery counter on successful load (after 10 seconds)
+// Reset recovery counter on successful load (after 30 seconds)
+// Increased to 30s because loading screen takes 15s. If error happens at 16s, we don't want to have cleared the counter yet.
 setTimeout(() => {
   localStorage.removeItem('crdt_recovery_attempts');
-}, 10000);
+}, 30000);
 
 import App from './App.jsx'
 import { AuthProvider } from './contexts/AuthContext'
