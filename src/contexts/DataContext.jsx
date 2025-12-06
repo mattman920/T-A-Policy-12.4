@@ -190,44 +190,52 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         // Do NOT set loading false here. It must go through checkCompletion.
     }, []);
 
-    // Ref to track if minimum time has passed
+    // Ref to track if minimum time has passed (just cosmetic now)
     const minTimePassedRef = useRef(false);
     const dataReadyRef = useRef(false);
 
-    // 1. Fixed 15-second timer & Progress Bar
+    // 1. Dynamic Loading Logic
     useEffect(() => {
         const startTime = Date.now();
-        const duration = 15000; // 15 seconds
+        const failsafeDuration = 60000; // 60 seconds failsafe for empty DBs
 
+        // Progress bar interval (Visual only, targeting 60s roughly)
         const interval = setInterval(() => {
             const elapsed = Date.now() - startTime;
-            const progress = Math.min(Math.floor((elapsed / duration) * 100), 100);
-            setLoadingProgress(progress);
+            // Slower progress bar that asymptotes towards 90%
+            setLoadingProgress(prev => {
+                if (prev >= 95) return prev;
+                return prev + 1; // Slow increment
+            });
 
-            if (elapsed >= duration) {
-                minTimePassedRef.current = true;
-                checkCompletion();
-                if (progress >= 100) clearInterval(interval);
+            // Failsafe: If no data after 60 seconds, assume empty DB and let in
+            if (elapsed >= failsafeDuration) {
+                console.warn('Loading failsafe triggered: No data found after 60s. Assuming empty DB.');
+                setLoading(false);
+                clearInterval(interval);
             }
-        }, 100);
+        }, 600); // Update every 600ms
 
         return () => clearInterval(interval);
     }, []);
 
     const checkCompletion = () => {
-        if (minTimePassedRef.current && dataReadyRef.current) {
-            console.log('Loading complete: 15s passed AND data ready.');
-            setLoading(false);
+        // STRICT CHECK: Only load if we have data or if manual override (failsafe) occurred
+        if (dataReadyRef.current) {
+            console.log('Loading complete: Data detected.');
+            setLoadingProgress(100);
+            setTimeout(() => setLoading(false), 500); // Short delay for UI smoothness
         }
     };
 
     // 2. Live Query Update
     useEffect(() => {
         if (connected) {
-            setLoadingMessage('Loading application data...');
+            setLoadingMessage('Synchronizing with database...');
         }
 
-        if (allDocs?.docs) {
+        if (allDocs?.docs && allDocs.docs.length > 0) {
+            // Data FOUND!
             // Process data immediately in background
             const violationsToFix = allDocs.docs.filter(d => d.docType === 'violation' && d.type === 'Callout');
             if (violationsToFix.length > 0) {
@@ -238,20 +246,23 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
 
             processDocs(allDocs.docs);
 
-            // Mark data as ready
+            // Mark data as ready and open the gates
             dataReadyRef.current = true;
             checkCompletion();
+
+        } else if (allDocs?.docs && allDocs.docs.length === 0) {
+            // Connected but NO data yet. Keep waiting.
+            // Do NOT set dataReadyRef.current = true here.
+            setLoadingMessage('Waiting for data...');
 
         } else if (allDocs?.error) {
             console.error("DataContext: Live query error:", allDocs.error);
-            // If error, we might still want to let them in after 15s? 
-            // For now, treat error as "ready" so we don't hang forever if DB fails
-            dataReadyRef.current = true;
-            checkCompletion();
+            // If error, we might still want to let them in? 
+            // For now, let the failsafe handle it.
         }
     }, [allDocs, processDocs, connected]);
 
-    // 2. Manual Fetch Fallback (for initial load reliability)
+    // 3. Manual Fetch Fallback (for initial load reliability)
     useEffect(() => {
         let attempts = 0;
         const fetchManual = async () => {
@@ -260,7 +271,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             try {
                 const result = await db.allDocs();
                 if (result.rows.length > 0) {
-                    // Only use manual data if live query hasn't populated yet
+                    // Data FOUND via manual fetch!
                     if (!allDocs?.docs || allDocs.docs.length === 0) {
                         const docs = result.rows.map(r => r.value);
                         processDocs(docs);
@@ -268,20 +279,17 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                         checkCompletion();
                     }
                 } else {
-                    // If both are empty, we are truly empty, but maybe sync is slow?
-                    if (!allDocs?.docs || allDocs.docs.length === 0) {
-                        if (attempts < 10) { // Increased attempts to wait for sync
-                            attempts++;
-                            setLoadingProgress(prev => Math.min(prev + 5, 90)); // Fake progress while waiting
-                            setTimeout(fetchManual, 1000);
-                        } else {
-                            setLoading(false); // Give up and show empty state
-                        }
+                    // Empty result. 
+                    // If live query is also empty, we just wait.
+                    // Retry a few times just to be sure it's not a connection blip
+                    if (attempts < 5) {
+                        attempts++;
+                        setTimeout(fetchManual, 2000);
                     }
+                    // After 5 attempts, we stop spamming and just wait for the failsafe or live query
                 }
             } catch (e) {
                 console.error('DataContext: Manual fetch failed', e);
-                setLoading(false);
             }
         };
 
@@ -290,14 +298,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             fetchManual();
         } else {
             // Simulate connection progress
-            const interval = setInterval(() => {
-                setLoadingProgress(prev => {
-                    if (prev < 40) return prev + 5;
-                    return prev;
-                });
-                setLoadingMessage('Connecting to database...');
-            }, 500);
-            return () => clearInterval(interval);
+            setLoadingMessage('Connecting to global database...');
         }
     }, [db, allDocs, processDocs, connected]);
 
