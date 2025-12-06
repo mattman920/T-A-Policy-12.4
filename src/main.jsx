@@ -34,44 +34,14 @@ window.addEventListener('unhandledrejection', async (event) => {
   )) {
     console.error('CRITICAL: Data corruption detected (Missing linked block). Initiating auto-recovery...');
 
-    // Prevent infinite reload loops
-    const reloadCount = parseInt(localStorage.getItem('crdt_recovery_attempts') || '0');
-
-    // If we have already tried twice, stop.
-    if (reloadCount >= 2) {
-      console.error(`Recovery failed after ${reloadCount} attempts. Stopping auto-reload.`);
-      alert('Application data appears corrupted and auto-recovery failed. Please clear your browser data for this site or contact support.');
-      // Do NOT clear the counter here immediately, so subsequent errors also get blocked.
-      // But we should probably clear it eventually or let the user clear it.
-      return;
-    }
-
-    localStorage.setItem('crdt_recovery_attempts', (reloadCount + 1).toString());
-
-    try {
-      // Attempt to clear Fireproof databases
-      const dbs = await window.indexedDB.databases();
-      for (const db of dbs) {
-        if (db.name && (db.name.includes('fireproof') || db.name.includes('attendance'))) {
-          console.log(`Deleting database: ${db.name}`);
-          window.indexedDB.deleteDatabase(db.name);
-        }
-      }
-    } catch (e) {
-      console.error('Error clearing databases:', e);
-    }
-
-    // Reload to resync
-    console.log('Reloading application...');
-    window.location.reload();
+    // Just log the error and let the app continue.
+    // The user explicitly requested NOT to clear the local DB and NOT to reload.
+    // We suppress the error so it doesn't crash the app, hoping that subsequent fetches or the manual fetch fallback will work.
+    console.warn('CRITICAL: Data corruption detected (Missing linked block). Suppressing error to allow app to load.');
   }
 });
 
-// Reset recovery counter on successful load (after 30 seconds)
-// Increased to 30s because loading screen takes 15s. If error happens at 16s, we don't want to have cleared the counter yet.
-setTimeout(() => {
-  localStorage.removeItem('crdt_recovery_attempts');
-}, 30000);
+
 
 import App from './App.jsx'
 import { AuthProvider } from './contexts/AuthContext'
