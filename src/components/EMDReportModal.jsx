@@ -103,8 +103,19 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                     const empViolations = data.violations.filter(v => v.employeeId === employee.id);
                     // Calculate points based on violations up to the end of the selected month
                     const reportDate = new Date(selectedYear, selectedMonth + 1, 0); // End of selected month
-                    const relevantViolations = empViolations.filter(v => new Date(v.date) <= reportDate);
                     const qKey = getQuarterKey(reportDate);
+
+                    // Parse Quarter Start Date
+                    const [qYearStr, qStr] = qKey.split('-');
+                    const qYear = parseInt(qYearStr);
+                    const qQuarter = parseInt(qStr.replace('Q', ''));
+                    const quarterStartDate = new Date(qYear, (qQuarter - 1) * 3, 1);
+
+                    // Filter violations to be within this quarter AND up to report date
+                    const relevantViolations = empViolations.filter(v => {
+                        const vDate = new Date(v.date);
+                        return vDate >= quarterStartDate && vDate <= reportDate;
+                    });
                     const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
                     currentPoints = calculateCurrentPoints(startPoints, relevantViolations, data.settings.violationPenalties);
                 }
