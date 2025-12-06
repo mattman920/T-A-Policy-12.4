@@ -17,8 +17,8 @@ class ErrorBoundary extends React.Component {
     handleHardReset = async () => {
         if (window.confirm('WARNING: This will delete ALL local data and reset the application. This cannot be undone. Are you sure?')) {
             try {
-                const dbName = 'attendance-tracker-v4';
-                const dbsToDelete = [dbName, `fp.${dbName}`, 'fireproof', 'fp.fireproof', 'attendance-tracker-v3', 'fp.attendance-tracker-v3'];
+                const dbName = 'attendance-tracker-v8';
+                const dbsToDelete = [dbName, `fp.${dbName}`, 'fireproof', 'fp.fireproof', 'attendance-tracker-v7', 'fp.attendance-tracker-v7', 'attendance-tracker-v6', 'fp.attendance-tracker-v6'];
 
                 // Clear IndexedDB
                 if (window.indexedDB && window.indexedDB.databases) {

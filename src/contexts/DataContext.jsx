@@ -681,8 +681,9 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                             }
                         }
 
-                        // Batch Insert
-                        const BATCH_SIZE = 50;
+                        // Batch Insert - SAFE IMPORT MODE
+                        // CHUNK_SIZE = 5 + 800ms delay prevents Compaction/Sync race conditions
+                        const BATCH_SIZE = 5;
                         const batches = [];
                         for (let i = 0; i < violationsToImport.length; i += BATCH_SIZE) {
                             batches.push(violationsToImport.slice(i, i + BATCH_SIZE));
@@ -694,17 +695,22 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                             const batch = batches[i];
                             setLoadingMessage(`Importing batch ${i + 1} of ${batches.length}...`);
 
-                            // Insert batch in parallel
+                            // 1. Insert batch in parallel
                             await Promise.all(batch.map(doc => safePut(doc)));
 
                             addedCount += batch.length;
 
-                            // Small delay to let DB breathe and UI update
-                            await new Promise(r => setTimeout(r, 100));
+                            // 2. CRITICAL: Artificial Delay for Compaction/Sync Handshake
+                            // We yield 800ms to allow Fireproof to compact blocks and Netlify Sync
+                            // to pick them up before we generate more.
+                            await new Promise(r => setTimeout(r, 800));
                         }
                     }
 
-                    console.log(`Import finished. Added: ${addedCount}, Skipped: ${skippedCount}`);
+                    console.log(`Import finished. Added: ${addedCount}, Skipped: ${skippedCount}. Waiting safely...`);
+                    // Final Settling Delay
+                    await new Promise(r => setTimeout(r, 2000));
+
                     resolve({ success: true, message: `Imported ${addedCount} violations. Skipped ${skippedCount}.` });
 
                 } catch (err) {
