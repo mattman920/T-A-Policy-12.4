@@ -105,7 +105,7 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                     const reportDate = new Date(selectedYear, selectedMonth + 1, 0); // End of selected month
                     const relevantViolations = empViolations.filter(v => new Date(v.date) <= reportDate);
                     const qKey = getQuarterKey(reportDate);
-                    const startPoints = calculateQuarterlyStart(qKey, data.violations, data.settings);
+                    const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
                     currentPoints = calculateCurrentPoints(startPoints, relevantViolations, data.settings.violationPenalties);
                 }
 

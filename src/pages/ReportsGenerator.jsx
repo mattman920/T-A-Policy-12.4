@@ -169,7 +169,7 @@ const ReportsGenerator = () => {
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
                     const qKey = getQuarterKey();
-                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
                     const points = calculateCurrentPoints(startPoints, empViolations, penalties);
                     const tier = determineTier(points, data.settings.daSettings);
 
@@ -197,7 +197,7 @@ const ReportsGenerator = () => {
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
                     const qKey = getQuarterKey();
-                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
                     const points = calculateCurrentPoints(startPoints, empViolations, penalties);
                     const tier = determineTier(points, data.settings.daSettings);
                     // "Within 17 points of the next tier" - implies dropping to a lower tier
@@ -236,7 +236,7 @@ const ReportsGenerator = () => {
                 return employees.map(e => {
                     const quarterViolations = violations.filter(v => v.employeeId === e.id && quarterMonths.includes(parseInt(v.date.split('-')[1]) - 1));
                     const qKey = `${now.getFullYear()}-${selectedQuarter}`;
-                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === e.id), data.settings);
                     const quarterPoints = calculateCurrentPoints(startPoints, quarterViolations, penalties);
 
                     const prevQ = selectedQuarter === 'Q1' ? 'Q4' : `Q${parseInt(selectedQuarter[1]) - 1}`;
@@ -244,7 +244,7 @@ const ReportsGenerator = () => {
                     const prevQKey = `${prevYear}-${prevQ}`;
                     const prevMonths = qMap[prevQ] || [];
                     const prevViolations = violations.filter(v => v.employeeId === e.id && prevMonths.includes(parseInt(v.date.split('-')[1]) - 1));
-                    const prevStartPoints = calculateQuarterlyStart(prevQKey, violations, data.settings);
+                    const prevStartPoints = calculateQuarterlyStart(prevQKey, violations.filter(v => v.employeeId === e.id), data.settings);
                     const prevPoints = calculateCurrentPoints(prevStartPoints, prevViolations, penalties);
 
                     return {
@@ -413,7 +413,7 @@ const ReportsGenerator = () => {
                 return employees.map(emp => {
                     const quarterViolations = violations.filter(v => v.employeeId === emp.id && quarterMonths.includes(parseInt(v.date.split('-')[1]) - 1));
                     const qKey = `${new Date().getFullYear()}-${selectedQuarter}`;
-                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === emp.id), data.settings);
                     const points = calculateCurrentPoints(startPoints, quarterViolations, penalties);
                     return { 'Employee': emp.name, 'Quarter': selectedQuarter, 'Status': determineTier(points, data.settings.daSettings).name };
                 });
@@ -482,7 +482,7 @@ const ReportsGenerator = () => {
                 const distribution = { 'Good Standing': 0, 'Coaching': 0, 'Severe': 0, 'Final': 0, 'Termination': 0 };
                 employees.forEach(emp => {
                     const qKey = getQuarterKey();
-                    const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === emp.id), data.settings);
                     const points = calculateCurrentPoints(startPoints, violations.filter(v => v.employeeId === emp.id), penalties);
                     const tier = determineTier(points, data.settings.daSettings);
                     if (distribution[tier.name] !== undefined) distribution[tier.name]++;
