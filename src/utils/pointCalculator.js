@@ -83,8 +83,9 @@ export function groupConsecutiveCallouts(violations) {
 
     for (let i = 0; i < sorted.length; i++) {
         const current = sorted[i];
+        const currentType = current.type === 'Callout' ? VIOLATION_TYPES.CALLOUT : current.type;
 
-        if (current.type !== VIOLATION_TYPES.CALLOUT) {
+        if (currentType !== VIOLATION_TYPES.CALLOUT) {
             result.push(current);
             continue;
         }
@@ -92,7 +93,8 @@ export function groupConsecutiveCallouts(violations) {
         let isConsecutive = false;
         // Look backwards for the nearest previous callout
         for (let j = i - 1; j >= 0; j--) {
-            if (sorted[j].type === VIOLATION_TYPES.CALLOUT) {
+            const prevType = sorted[j].type === 'Callout' ? VIOLATION_TYPES.CALLOUT : sorted[j].type;
+            if (prevType === VIOLATION_TYPES.CALLOUT) {
                 const currentDate = parseDate(current.date);
                 const prevDate = parseDate(sorted[j].date);
 
@@ -142,24 +144,31 @@ export function calculateDeductions(violations, penalties = null) {
     let calloutCount = 0;
     const tardyCountsByMonth = {};
 
+    // Helper to normalize violation type
+    const normalizeType = (type) => {
+        if (type === 'Callout') return VIOLATION_TYPES.CALLOUT;
+        return type;
+    };
+
     sortedViolations.forEach(v => {
-        if (v.type === VIOLATION_TYPES.CALLOUT) {
+        const type = normalizeType(v.type);
+        if (type === VIOLATION_TYPES.CALLOUT) {
             const penalty = calloutPenalties[Math.min(calloutCount, calloutPenalties.length - 1)];
             totalDeduction += penalty;
             calloutCount++;
-        } else if (tardyPenalties[v.type]) {
+        } else if (tardyPenalties[type]) {
             const date = parseDate(v.date);
             const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
 
             if (!tardyCountsByMonth[monthKey]) tardyCountsByMonth[monthKey] = {};
-            if (!tardyCountsByMonth[monthKey][v.type]) tardyCountsByMonth[monthKey][v.type] = 0;
+            if (!tardyCountsByMonth[monthKey][type]) tardyCountsByMonth[monthKey][type] = 0;
 
-            const count = tardyCountsByMonth[monthKey][v.type];
-            const penaltyList = tardyPenalties[v.type];
+            const count = tardyCountsByMonth[monthKey][type];
+            const penaltyList = tardyPenalties[type];
             const penalty = penaltyList[Math.min(count, penaltyList.length - 1)];
 
             totalDeduction += penalty;
-            tardyCountsByMonth[monthKey][v.type]++;
+            tardyCountsByMonth[monthKey][type]++;
         }
     });
 
@@ -271,13 +280,13 @@ export function calculateMonthlyBonus(violationsInMonth, shiftsWorked) {
  * @returns {number} Starting balance for the target quarter
  */
 export function calculateQuarterlyStart(targetQuarterKey, allViolations, settings) {
-    console.log(`[DEBUG] calculateQuarterlyStart called for ${targetQuarterKey}`);
+
     const { daSettings, quarterlyPurges, startingPoints } = settings;
     const maxPoints = startingPoints || 150; // Use setting or default
 
     // 1. Check for Quarter Purge (Override)
     if (quarterlyPurges && quarterlyPurges[targetQuarterKey]) {
-        console.log(`[DEBUG] Quarter Purge active for ${targetQuarterKey}. Returning ${maxPoints}.`);
+
         return maxPoints;
     }
 
@@ -340,13 +349,13 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
     });
 
     if (!hasHistory) {
-        console.log(`[DEBUG] No history found before ${targetQuarterKey}. Returning maxPoints: ${maxPoints}`);
+
         return maxPoints;
     }
 
     // Recursive Step: Get Start of Previous Quarter
     const prevStart = calculateQuarterlyStart(prevQuarterKey, allViolations, settings);
-    console.log(`[DEBUG] Recursive call returned for ${prevQuarterKey}. prevStart: ${prevStart}`);
+
 
     // Calculate End of Previous Quarter
     const prevQStartMonth = (prevQ - 1) * 3;
@@ -354,23 +363,23 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
     const prevQStartDate = new Date(prevYear, prevQStartMonth, 1);
     const prevQEndDate = new Date(prevYear, prevQEndMonth, 0, 23, 59, 59);
 
-    console.log(`[DEBUG] Checking violations for ${prevQuarterKey} between ${prevQStartDate.toISOString()} and ${prevQEndDate.toISOString()}`);
+
 
     const prevQuarterViolations = allViolations.filter(v => {
         const d = parseDate(v.date);
         const isValid = !isNaN(d.getTime());
         const inRange = isValid && d >= prevQStartDate && d <= prevQEndDate;
 
-        console.log(`[DEBUG] Filter Check: Date="${v.date}" InRange=${inRange}`);
+
 
         return inRange;
     });
 
-    console.log(`[DEBUG] Found ${prevQuarterViolations.length} violations for ${prevQuarterKey}`);
+
 
     const endScore = calculateCurrentPoints(prevStart, prevQuarterViolations, settings.violationPenalties);
     const endingTier = determineTier(endScore, daSettings);
-    console.log(`[DEBUG] Prev Q (${prevQuarterKey}) Start: ${prevStart}, End: ${endScore}, Tier: ${endingTier.name}`);
+
 
     // Helper to determine next start based on dynamic settings
     const getNextStart = (tier, daConfig, max) => {
@@ -404,25 +413,25 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
         const startLevel = getTierLevel(startTier);
         const endLevel = getTierLevel(endingTier);
 
-        console.log(`[DEBUG] Clean Slate Check for ${targetQuarterKey}: StartTier=${startTier.name}(${startLevel}), EndTier=${endingTier.name}(${endLevel})`);
+
 
         // "As long as they do not drop into the Severe Stage (two tiers down)..."
         // Logic: If they drop 2 or more levels, they fail clean slate.
         if (startLevel - endLevel >= 2) {
-            console.log(`[DEBUG] Clean Slate FAILED. Dropped ${startLevel - endLevel} levels.`);
+
             return nextStart; // Failed clean slate, use standard rollover
         }
 
         if (endingTier.name === TIERS.TERMINATION.name) {
-            console.log(`[DEBUG] Clean Slate FAILED. Termination.`);
+
             return 0;
         }
 
-        console.log(`[DEBUG] Clean Slate PASSED. Resetting to ${maxPoints}.`);
+
         return maxPoints; // Success clean slate
     }
 
-    console.log(`[DEBUG] Standard Rollover (No Clean Slate). Returning ${nextStart}.`);
+
     // Standard Rollover
     return nextStart;
 }

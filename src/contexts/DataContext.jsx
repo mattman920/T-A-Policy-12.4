@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
 import { calculateCurrentPoints, calculateQuarterlyStart, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
 import { getCurrentQuarterDates } from '../utils/dateUtils';
+import { deepSanitize } from '../utils/dataUtils';
 import { useAuth } from './AuthContext';
 import { useDB } from '../hooks/useDB';
 
@@ -92,6 +93,9 @@ export function DataProvider({ children }) {
         // Wait, useLiveQuery(db, 'type', 'violation') implies an index on 'type'.
         // If I use 'type' for violation type (e.g. 'Tardy'), I can't use it for doc type easily.
         // I will use 'docType' for the document type.
+        // Wait, useLiveQuery(db, 'type', 'violation') implies an index on 'type'.
+        // If I use 'type' for violation type (e.g. 'Tardy'), I can't use it for doc type easily.
+        // I will use 'docType' for the document type.
 
         // RE-EVALUATING:
         // I will change the index to use 'docType'.
@@ -117,8 +121,13 @@ export function DataProvider({ children }) {
 
 // Define map function outside component for stable reference
 const mapAllDocs = (doc) => {
-    // console.log('Indexing doc:', doc._id);
-    return doc.docType || 'unknown';
+    try {
+        if (!doc) return 'unknown';
+        return doc.docType || 'unknown';
+    } catch (e) {
+        console.error('Error mapping doc:', e, doc);
+        return 'error';
+    }
 };
 
 // Split into inner component to use hooks properly
@@ -142,75 +151,95 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
         return `${year}-Q${q}`;
     };
 
+    const processDocs = useCallback((docs) => {
+        const employees = docs.filter(d => d.docType === 'employee');
+        const violations = docs.filter(d => d.docType === 'violation').map(v => ({ ...v, type: v.violationType || v.type }));
+        const settingsDoc = docs.find(d => d.docType === 'settings') || {};
+        const settings = { ...DEFAULT_SETTINGS, ...settingsDoc };
+        const issuedDAs = docs.filter(d => d.docType === 'issuedDA').map(d => d.daKey);
+
+        // Calculate points
+        const currentQuarterKey = getQuarterKey();
+        const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
+
+        const processedEmployees = employees.map(employee => {
+            const employeeViolations = violations.filter(v => v.employeeId === employee._id);
+            const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, settings);
+            const currentQuarterViolations = employeeViolations.filter(v => {
+                const vDate = new Date(v.date);
+                return vDate >= qStart && vDate <= qEnd;
+            });
+            const currentPoints = calculateCurrentPoints(
+                startingPoints,
+                currentQuarterViolations,
+                settings.violationPenalties
+            );
+            return { ...employee, currentPoints, id: employee._id };
+        });
+
+        setData({
+            employees: processedEmployees,
+            violations: violations.map(v => ({ ...v, id: v._id })),
+            quarters: [],
+            issuedDAs,
+            settings
+        });
+        setLoading(false);
+    }, []);
+
+    // 1. Live Query Update & Migration
     useEffect(() => {
-        if (allDocs.docs) {
-            const docs = allDocs.docs;
-            console.log('DataContext: Live query updated', docs.length, 'docs');
-
-            const employees = docs.filter(d => d.docType === 'employee');
-            const violations = docs.filter(d => d.docType === 'violation').map(v => ({ ...v, type: v.violationType || v.type })); // Handle migration/naming
-            const settingsDoc = docs.find(d => d.docType === 'settings') || {};
-            const settings = { ...DEFAULT_SETTINGS, ...settingsDoc };
-            const issuedDAs = docs.filter(d => d.docType === 'issuedDA').map(d => d.daKey);
-
-            // Calculate points
-            const currentQuarterKey = getQuarterKey();
-            const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
-
-            const processedEmployees = employees.map(employee => {
-                const employeeViolations = violations.filter(v => v.employeeId === employee._id);
-
-                const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, settings);
-
-                const currentQuarterViolations = employeeViolations.filter(v => {
-                    const vDate = new Date(v.date);
-                    return vDate >= qStart && vDate <= qEnd;
+        if (allDocs?.docs && allDocs.docs.length > 0) {
+            // Migration: Fix "Callout" -> "Call Out"
+            const violationsToFix = allDocs.docs.filter(d => d.docType === 'violation' && d.type === 'Callout');
+            if (violationsToFix.length > 0) {
+                console.log(`Migrating ${violationsToFix.length} violations from 'Callout' to 'Call Out'...`);
+                violationsToFix.forEach(v => {
+                    safePut({ ...v, type: 'Call Out', violationType: 'Call Out' });
                 });
+            }
 
-                const currentPoints = calculateCurrentPoints(
-                    startingPoints,
-                    currentQuarterViolations,
-                    settings.violationPenalties
-                );
-
-                return { ...employee, currentPoints, id: employee._id };
-            });
-
-            setData({
-                employees: processedEmployees,
-                violations: violations.map(v => ({ ...v, id: v._id })),
-                quarters: [],
-                issuedDAs,
-                settings
-            });
-            setLoading(false);
+            processDocs(allDocs.docs);
+        } else if (allDocs?.error) {
+            console.error("DataContext: Live query error:", allDocs.error);
         }
-    }, [allDocs.docs]);
+    }, [allDocs, processDocs]);
+
+    // 2. Manual Fetch Fallback (for initial load reliability)
+    useEffect(() => {
+        let attempts = 0;
+        const fetchManual = async () => {
+            try {
+                const result = await db.allDocs();
+                if (result.rows.length > 0) {
+                    // Only use manual data if live query hasn't populated yet
+                    if (!allDocs?.docs || allDocs.docs.length === 0) {
+                        const docs = result.rows.map(r => r.value);
+                        processDocs(docs);
+                    }
+                } else {
+                    // If both are empty, we are truly empty, but maybe sync is slow?
+                    if (!allDocs?.docs || allDocs.docs.length === 0) {
+                        if (attempts < 5) {
+                            attempts++;
+                            setTimeout(fetchManual, 1000);
+                        } else {
+                            setLoading(false);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('DataContext: Manual fetch failed', e);
+                setLoading(false);
+            }
+        };
+        fetchManual();
+    }, [db, allDocs, processDocs]);
 
     console.log('DataProvider: organizationId', organizationId);
 
-    // Helper to recursively remove undefined values
-    const deepSanitize = (obj) => {
-        if (Number.isNaN(obj)) return null; // Handle NaN
-        if (obj instanceof Date) {
-            return obj.toISOString();
-        }
-        if (Array.isArray(obj)) {
-            return obj.map(v => {
-                const sanitized = deepSanitize(v);
-                return sanitized === undefined ? null : sanitized;
-            });
-        } else if (obj !== null && typeof obj === 'object') {
-            return Object.keys(obj).reduce((acc, key) => {
-                const value = deepSanitize(obj[key]);
-                if (value !== undefined) {
-                    acc[key] = value;
-                }
-                return acc;
-            }, {});
-        }
-        return obj;
-    };
+    // Helper to recursively remove undefined values - Moved to utils/dataUtils.js
+    // const deepSanitize = ...
 
     // Helper to safely put data to Fireproof
     const safePut = async (doc) => {
@@ -448,6 +477,14 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
     };
 
     const deleteEmployee = async (employeeId) => {
+        // Optimistic Update
+        setData(prev => ({
+            ...prev,
+            employees: prev.employees.filter(e => e.id !== employeeId),
+            violations: prev.violations.filter(v => v.employeeId !== employeeId),
+            issuedDAs: prev.issuedDAs.filter(da => !da.startsWith(`${employeeId}-`))
+        }));
+
         await db.del(employeeId);
         // Also delete violations? 
         // Original code: this.data.violations = this.data.violations.filter(v => v.employeeId !== id);
@@ -496,33 +533,168 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
         a.click();
     };
 
-    const importDatabase = async (file) => {
-        // Parse file and bulk put
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                const imported = JSON.parse(e.target.result);
+    const importDatabase = (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    console.log('Starting import...');
 
-                if (imported.employees) {
-                    for (const emp of imported.employees) {
-                        await db.put({ ...emp, docType: 'employee' });
+                    // 1. Fetch Live Context from DB (Directly) to ensure Real IDs
+                    // We avoid using 'data.employees' state to prevent linking to temporary optimistic IDs
+                    const allDocsResult = await db.allDocs();
+                    const dbDocs = allDocsResult.rows.map(r => r.value);
+                    const dbEmployees = dbDocs.filter(d => d.docType === 'employee');
+
+                    const liveContextMap = new Map();
+                    dbEmployees.forEach(emp => {
+                        if (emp.active && emp.name) {
+                            liveContextMap.set(emp.name.trim().toLowerCase(), emp._id);
+                        }
+                    });
+
+                    console.log(`Loaded ${liveContextMap.size} active employees from DB for matching.`);
+
+                    // 2. Build JSON Lookup: Map<Legacy_JSON_UUID, Name>
+                    const legacyJsonMap = new Map();
+                    if (imported.employees && Array.isArray(imported.employees)) {
+                        imported.employees.forEach(emp => {
+                            if (emp.name && emp.name.trim() !== '') {
+                                legacyJsonMap.set(emp.id, emp.name.trim());
+                            }
+                        });
                     }
-                }
-                if (imported.violations) {
-                    for (const v of imported.violations) {
-                        await db.put({ ...v, docType: 'violation' });
+
+                    // Helper for yielding to UI
+                    const yieldToUI = () => new Promise(r => setTimeout(r, 0));
+
+                    // 3. Process Violations
+                    let addedCount = 0;
+                    let skippedCount = 0;
+
+                    if (imported.violations && Array.isArray(imported.violations)) {
+                        // Pre-fetch existing violations to check for duplicates
+                        const existingViolations = dbDocs.filter(d => d.docType === 'violation');
+                        const existingSignatures = new Set();
+                        existingViolations.forEach(v => {
+                            // Signature: employeeId|date|type
+                            existingSignatures.add(`${v.employeeId}|${v.date}|${v.type}`);
+                        });
+
+                        let count = 0;
+                        for (const v of imported.violations) {
+                            // Step A: Resolve Name
+                            const legacyId = v.employeeId;
+                            const name = legacyJsonMap.get(legacyId);
+
+                            if (name) {
+                                // Step B: Check Existence in Live Context
+                                const normalizedName = name.toLowerCase();
+                                const liveAppUserId = liveContextMap.get(normalizedName);
+
+                                if (liveAppUserId) {
+                                    // Step C: Filter & Insert
+                                    // Check for duplicates
+                                    const dateStr = v.date; // Assuming YYYY-MM-DD from JSON
+                                    const signature = `${liveAppUserId}|${dateStr}|${v.type}`;
+
+                                    if (!existingSignatures.has(signature)) {
+                                        // Insert
+                                        const newViolation = {
+                                            docType: 'violation',
+                                            employeeId: liveAppUserId,
+                                            type: v.type,
+                                            violationType: v.type,
+                                            date: dateStr,
+                                            shift: v.shift || 'AM',
+                                            pointsDeducted: v.pointsDeducted,
+                                            organizationId: organizationId || 'local-org'
+                                        };
+
+                                        await safePut(newViolation);
+                                        existingSignatures.add(signature);
+                                        addedCount++;
+                                    } else {
+                                        // Duplicate
+                                        skippedCount++;
+                                    }
+                                } else {
+                                    // Name not found in live DB
+                                    console.warn(`Skipping violation for ${name}: Employee not found in active DB.`);
+                                    skippedCount++;
+                                }
+                            } else {
+                                // Name null/empty in JSON
+                                skippedCount++;
+                            }
+
+                            count++;
+                            if (count % 20 === 0) await yieldToUI();
+                        }
                     }
+
+                    console.log(`Import finished. Added: ${addedCount}, Skipped: ${skippedCount}`);
+                    resolve({ success: true, message: `Imported ${addedCount} violations. Skipped ${skippedCount}.` });
+
+                } catch (err) {
+                    console.error("Import failed", err);
+                    resolve({ success: false, error: err.message });
                 }
-                if (imported.settings) {
-                    await updateSettings(imported.settings);
-                }
-                window.location.reload();
-            } catch (err) {
-                console.error("Import failed", err);
-            }
-        };
-        reader.readAsText(file);
+            };
+            reader.onerror = () => resolve({ success: false, error: 'File reading failed' });
+            reader.readAsText(file);
+        });
     };
+
+    const purgeOrphanedViolations = async () => {
+        const validEmployeeIds = new Set(data.employees.map(e => e.id));
+        const orphanedViolations = data.violations.filter(v => !validEmployeeIds.has(v.employeeId));
+
+        if (orphanedViolations.length === 0) {
+            alert('No orphaned violations found.');
+            return;
+        }
+
+        if (confirm(`Found ${orphanedViolations.length} violations with unknown employees. Delete them?`)) {
+            let count = 0;
+            for (const v of orphanedViolations) {
+                await db.del(v.id);
+                count++;
+            }
+            alert(`Successfully deleted ${count} orphaned violations. Please run the import again.`);
+            // Trigger a reload to ensure UI is fresh
+            window.location.reload();
+        }
+    };
+
+    const nuclearReset = async () => {
+        try {
+            const allDocs = await db.allDocs();
+            const docs = allDocs.rows.map(r => r.value);
+
+            if (docs.length === 0) {
+                alert('Database is already empty.');
+                return;
+            }
+
+            console.log(`Nuclear Reset: Deleting ${docs.length} documents...`);
+
+            // Delete all documents
+            for (const doc of docs) {
+                await db.del(doc._id);
+            }
+
+            console.log('Nuclear Reset: Complete.');
+            // Force reload to clear state
+            window.location.reload();
+        } catch (error) {
+            console.error('Nuclear Reset failed:', error);
+            alert('Nuclear Reset failed. Check console for details.');
+        }
+    };
+
+
 
     const value = {
         data,
@@ -534,13 +706,49 @@ function DataProviderContent({ db, useLiveQuery, organizationId, isOfflineMode, 
         reload: () => { }, // No-op as it's live
         exportDatabase,
         importDatabase,
+        purgeOrphanedViolations,
+
         issueDA,
         updateSettings,
         updateEmployee,
         deleteEmployee,
         logReportUsage,
-        isOfflineMode
+        isOfflineMode,
+        nuclearReset
     };
+
+    if (loading) {
+        return (
+            <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '100vh',
+                backgroundColor: '#1f2937', // Dark gray background
+                color: '#f3f4f6', // Light text
+                fontFamily: 'system-ui, -apple-system, sans-serif'
+            }}>
+                <div style={{ textAlign: 'center' }}>
+                    <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Loading Attendance Tracker...</h2>
+                    <div style={{
+                        width: '40px',
+                        height: '40px',
+                        border: '4px solid #374151', // Darker border
+                        borderTop: '4px solid #60a5fa', // Lighter blue for contrast
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite',
+                        margin: '0 auto'
+                    }}></div>
+                    <style>{`
+                        @keyframes spin {
+                            0% { transform: rotate(0deg); }
+                            100% { transform: rotate(360deg); }
+                        }
+                    `}</style>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <DataContext.Provider value={value}>

@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import JSZip from 'jszip';
 import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, TIERS } from './pointCalculator';
 import { getQuarterKey } from './dateUtils';
 import { getHealthStage, prepareAiPayload } from '../services/healthCheckService';
@@ -333,7 +334,7 @@ export const generateHealthCheckPDF = async (employees, startDate, endDate, data
     if (window.electron) {
         if (generatedFiles.length === 1) {
             // Single file save
-            window.electron.savePdf({
+            await window.electron.savePdf({
                 pdfData: generatedFiles[0].pdfData,
                 defaultPath: generatedFiles[0].fileName
             }).then(result => {
@@ -343,7 +344,7 @@ export const generateHealthCheckPDF = async (employees, startDate, endDate, data
             });
         } else {
             // Multiple files save
-            window.electron.saveMultiplePdfs(generatedFiles).then(result => {
+            await window.electron.saveMultiplePdfs(generatedFiles).then(result => {
                 if (result.success) {
                     alert(`Successfully saved ${result.results.length} reports to ${result.outputDir}`);
                 } else if (!result.canceled) {
@@ -352,17 +353,28 @@ export const generateHealthCheckPDF = async (employees, startDate, endDate, data
             });
         }
     } else {
-        // Fallback for non-electron (browser dev) - just save the first one or zip?
-        // For now, just save the first one to avoid browser spam
-        if (generatedFiles.length > 0) {
-            const doc = new jsPDF();
-            // Re-create doc for download or just use the data?
-            // jsPDF .save() works on the instance.
-            // Since we created new instances in the loop, we can't easily call .save() on all.
-            // This is a dev-only fallback, so it's acceptable to just alert or save one.
-            alert("Browser mode: Only downloading the first report.");
-            // We need the doc instance to call save, but we didn't store it.
-            // Let's just ignore this edge case as the user is on Electron.
+        // Fallback for non-electron (browser dev)
+        if (generatedFiles.length === 1) {
+            const file = generatedFiles[0];
+            const link = document.createElement('a');
+            link.href = `data:application/pdf;base64,${file.pdfData}`;
+            link.download = file.fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else if (generatedFiles.length > 1) {
+            const zip = new JSZip();
+            generatedFiles.forEach(file => {
+                zip.file(file.fileName, file.pdfData, { base64: true });
+            });
+
+            const content = await zip.generateAsync({ type: 'blob' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            link.download = 'Health_Check_Reports.zip';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
     }
 };
@@ -634,7 +646,7 @@ export const generateHealthCheckPDFsFromData = async (results) => {
     if (window.electron) {
         if (generatedFiles.length === 1) {
             // Single file save
-            window.electron.savePdf({
+            await window.electron.savePdf({
                 pdfData: generatedFiles[0].pdfData,
                 defaultPath: generatedFiles[0].fileName
             }).then(result => {
@@ -644,7 +656,7 @@ export const generateHealthCheckPDFsFromData = async (results) => {
             });
         } else {
             // Multiple files save
-            window.electron.saveMultiplePdfs(generatedFiles).then(result => {
+            await window.electron.saveMultiplePdfs(generatedFiles).then(result => {
                 if (result.success) {
                     alert(`Successfully saved ${result.results.length} reports to ${result.outputDir}`);
                 } else if (!result.canceled) {
@@ -653,10 +665,28 @@ export const generateHealthCheckPDFsFromData = async (results) => {
             });
         }
     } else {
-        // Fallback for non-electron (browser dev) - just save the first one or zip?
-        // For now, just save the first one to avoid browser spam
-        if (generatedFiles.length > 0) {
-            alert("Browser mode: Only downloading the first report.");
+        // Fallback for non-electron (browser dev)
+        if (generatedFiles.length === 1) {
+            const file = generatedFiles[0];
+            const link = document.createElement('a');
+            link.href = `data:application/pdf;base64,${file.pdfData}`;
+            link.download = file.fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else if (generatedFiles.length > 1) {
+            const zip = new JSZip();
+            generatedFiles.forEach(file => {
+                zip.file(file.fileName, file.pdfData, { base64: true });
+            });
+
+            const content = await zip.generateAsync({ type: 'blob' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            link.download = 'Health_Check_Reports.zip';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
     }
 };

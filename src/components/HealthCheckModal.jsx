@@ -86,7 +86,7 @@ const HealthCheckModal = ({ isOpen, onClose }) => {
                     return d >= quarterStart && d <= quarterEnd;
                 });
                 const qKey = getQuarterKey(quarterStart);
-                const startPoints = calculateQuarterlyStart(qKey, violations, data.settings);
+                const startPoints = calculateQuarterlyStart(qKey, empViolationsAll, data.settings);
                 const currentScore = calculateCurrentPoints(startPoints, empViolationsInQuarter, penalties);
 
                 // Violations in range

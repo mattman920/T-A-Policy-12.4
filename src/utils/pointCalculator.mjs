@@ -37,24 +37,55 @@ export const DEFAULT_POSITIVE_ADJUSTMENTS = {
 };
 
 /**
+ * Helper to safely parse date string to local date object.
+ * Handles MM/DD/YYYY, YYYY-MM-DD, and ISO strings.
+ * @param {string} dateStr 
+ * @returns {Date}
+ */
+export const parseDate = (dateStr) => {
+    if (!dateStr) return new Date();
+
+    // Handle MM/DD/YYYY or DD/MM/YYYY (slashes)
+    if (dateStr.includes('/')) {
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+            const d = new Date(dateStr);
+            if (!isNaN(d.getTime())) return d;
+        }
+    }
+
+    // Handle MM-DD-YYYY or M-D-YYYY (dashes)
+    if (dateStr.includes('-')) {
+        const parts = dateStr.split('-');
+        // If we have 3 parts and the last one is a year (4 digits)
+        if (parts.length === 3 && parts[2].length === 4) {
+            const [p1, p2, p3] = parts;
+            // Pad single digits with 0
+            const m = p1.length === 1 ? `0${p1}` : p1;
+            const d = p2.length === 1 ? `0${p2}` : p2;
+            // Reformat to YYYY-MM-DD for consistent parsing
+            return new Date(`${p3}-${m}-${d}T00:00:00`);
+        }
+    }
+
+    if (dateStr.includes('T')) return new Date(dateStr);
+    return new Date(`${dateStr}T00:00:00`);
+};
+
+/**
  * Groups consecutive callouts into single instances.
  * @param {Array} violations 
  * @returns {Array}
  */
 export function groupConsecutiveCallouts(violations) {
-    const parseDate = (dateStr) => {
-        if (!dateStr) return new Date();
-        if (dateStr.includes('T')) return new Date(dateStr);
-        return new Date(`${dateStr}T00:00:00`);
-    };
-
     const sorted = [...violations].sort((a, b) => parseDate(a.date) - parseDate(b.date));
     const result = [];
 
     for (let i = 0; i < sorted.length; i++) {
         const current = sorted[i];
+        const currentType = current.type === 'Callout' ? VIOLATION_TYPES.CALLOUT : current.type;
 
-        if (current.type !== VIOLATION_TYPES.CALLOUT) {
+        if (currentType !== VIOLATION_TYPES.CALLOUT) {
             result.push(current);
             continue;
         }
@@ -62,7 +93,8 @@ export function groupConsecutiveCallouts(violations) {
         let isConsecutive = false;
         // Look backwards for the nearest previous callout
         for (let j = i - 1; j >= 0; j--) {
-            if (sorted[j].type === VIOLATION_TYPES.CALLOUT) {
+            const prevType = sorted[j].type === 'Callout' ? VIOLATION_TYPES.CALLOUT : sorted[j].type;
+            if (prevType === VIOLATION_TYPES.CALLOUT) {
                 const currentDate = parseDate(current.date);
                 const prevDate = parseDate(sorted[j].date);
 
@@ -100,15 +132,6 @@ export function calculateDeductions(violations, penalties = null) {
 
     let totalDeduction = 0;
 
-    // Helper to safely parse date string to local date object
-    const parseDate = (dateStr) => {
-        if (!dateStr) return new Date();
-        // If it's already a full ISO string with time, use it
-        if (dateStr.includes('T')) return new Date(dateStr);
-        // If it's just YYYY-MM-DD, append time to force local interpretation
-        return new Date(`${dateStr}T00:00:00`);
-    };
-
     // Filter out covered callouts BEFORE grouping or calculating
     const activeViolations = violations.filter(v => !v.shiftCovered);
 
@@ -121,24 +144,31 @@ export function calculateDeductions(violations, penalties = null) {
     let calloutCount = 0;
     const tardyCountsByMonth = {};
 
+    // Helper to normalize violation type
+    const normalizeType = (type) => {
+        if (type === 'Callout') return VIOLATION_TYPES.CALLOUT;
+        return type;
+    };
+
     sortedViolations.forEach(v => {
-        if (v.type === VIOLATION_TYPES.CALLOUT) {
+        const type = normalizeType(v.type);
+        if (type === VIOLATION_TYPES.CALLOUT) {
             const penalty = calloutPenalties[Math.min(calloutCount, calloutPenalties.length - 1)];
             totalDeduction += penalty;
             calloutCount++;
-        } else if (tardyPenalties[v.type]) {
+        } else if (tardyPenalties[type]) {
             const date = parseDate(v.date);
             const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
 
             if (!tardyCountsByMonth[monthKey]) tardyCountsByMonth[monthKey] = {};
-            if (!tardyCountsByMonth[monthKey][v.type]) tardyCountsByMonth[monthKey][v.type] = 0;
+            if (!tardyCountsByMonth[monthKey][type]) tardyCountsByMonth[monthKey][type] = 0;
 
-            const count = tardyCountsByMonth[monthKey][v.type];
-            const penaltyList = tardyPenalties[v.type];
+            const count = tardyCountsByMonth[monthKey][type];
+            const penaltyList = tardyPenalties[type];
             const penalty = penaltyList[Math.min(count, penaltyList.length - 1)];
 
             totalDeduction += penalty;
-            tardyCountsByMonth[monthKey][v.type]++;
+            tardyCountsByMonth[monthKey][type]++;
         }
     });
 
@@ -191,22 +221,22 @@ export function determineTier(points, customTiers = null) {
     if (customTiers) {
         // Good Standing: > Educational Threshold
         // Note: If educational threshold is set to max points (e.g. 150), we use >= to ensure max points is Good Standing.
-        if (points >= customTiers.educational) return TIERS.GOOD;
+        if (points >= customTiers.educational) return { ...TIERS.GOOD, color: TIERS.GOOD.color };
 
         // Educational: <= Educational AND > Coaching
-        if (points > customTiers.coaching) return { ...TIERS.EDUCATIONAL, min: customTiers.educational };
+        if (points > customTiers.coaching) return { ...TIERS.EDUCATIONAL, min: customTiers.educational, color: TIERS.EDUCATIONAL.color };
 
         // Coaching: <= Coaching AND > Severe
-        if (points > customTiers.severe) return { ...TIERS.COACHING, min: customTiers.coaching };
+        if (points > customTiers.severe) return { ...TIERS.COACHING, min: customTiers.coaching, color: TIERS.COACHING.color };
 
         // Severe: <= Severe AND > Final
-        if (points > customTiers.final) return { ...TIERS.SEVERE, min: customTiers.severe };
+        if (points > customTiers.final) return { ...TIERS.SEVERE, min: customTiers.severe, color: TIERS.SEVERE.color };
 
         // Final: <= Final AND >= 0
-        if (points >= 0) return { ...TIERS.FINAL, min: customTiers.final };
+        if (points >= 0) return { ...TIERS.FINAL, min: customTiers.final, color: TIERS.FINAL.color };
 
         // Termination: < 0
-        return TIERS.TERMINATION;
+        return { ...TIERS.TERMINATION, color: TIERS.TERMINATION.color };
     }
 
     // Default fallback
@@ -250,11 +280,13 @@ export function calculateMonthlyBonus(violationsInMonth, shiftsWorked) {
  * @returns {number} Starting balance for the target quarter
  */
 export function calculateQuarterlyStart(targetQuarterKey, allViolations, settings) {
+
     const { daSettings, quarterlyPurges, startingPoints } = settings;
     const maxPoints = startingPoints || 150; // Use setting or default
 
     // 1. Check for Quarter Purge (Override)
     if (quarterlyPurges && quarterlyPurges[targetQuarterKey]) {
+
         return maxPoints;
     }
 
@@ -272,9 +304,42 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
     }
     const prevQuarterKey = `${prevYear}-Q${prevQ}`;
 
+    // Helper to safely parse date string to local date object
+    const parseDate = (dateStr) => {
+        if (!dateStr) return new Date();
+
+        // Handle MM/DD/YYYY or DD/MM/YYYY (slashes)
+        if (dateStr.includes('/')) {
+            const parts = dateStr.split('/');
+            if (parts.length === 3) {
+                const d = new Date(dateStr);
+                if (!isNaN(d.getTime())) return d;
+            }
+        }
+
+        // Handle MM-DD-YYYY or M-D-YYYY (dashes)
+        if (dateStr.includes('-')) {
+            const parts = dateStr.split('-');
+            // If we have 3 parts and the last one is a year (4 digits)
+            if (parts.length === 3 && parts[2].length === 4) {
+                const [p1, p2, p3] = parts;
+                // Pad single digits with 0
+                const m = p1.length === 1 ? `0${p1}` : p1;
+                const d = p2.length === 1 ? `0${p2}` : p2;
+                // Reformat to YYYY-MM-DD for consistent parsing
+                return new Date(`${p3}-${m}-${d}T00:00:00`);
+            }
+        }
+
+        if (dateStr.includes('T')) return new Date(dateStr);
+        return new Date(`${dateStr}T00:00:00`);
+    };
+
     // Base Case: Check history
     const hasHistory = allViolations.some(v => {
-        const d = new Date(v.date);
+        const d = parseDate(v.date);
+        if (isNaN(d.getTime())) return false; // Skip invalid dates
+
         const vYear = d.getFullYear();
         const vMonth = d.getMonth();
         const vQ = Math.floor(vMonth / 3) + 1;
@@ -284,11 +349,13 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
     });
 
     if (!hasHistory) {
+
         return maxPoints;
     }
 
     // Recursive Step: Get Start of Previous Quarter
     const prevStart = calculateQuarterlyStart(prevQuarterKey, allViolations, settings);
+
 
     // Calculate End of Previous Quarter
     const prevQStartMonth = (prevQ - 1) * 3;
@@ -296,13 +363,23 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
     const prevQStartDate = new Date(prevYear, prevQStartMonth, 1);
     const prevQEndDate = new Date(prevYear, prevQEndMonth, 0, 23, 59, 59);
 
+
+
     const prevQuarterViolations = allViolations.filter(v => {
-        const d = new Date(v.date);
-        return d >= prevQStartDate && d <= prevQEndDate;
+        const d = parseDate(v.date);
+        const isValid = !isNaN(d.getTime());
+        const inRange = isValid && d >= prevQStartDate && d <= prevQEndDate;
+
+
+
+        return inRange;
     });
+
+
 
     const endScore = calculateCurrentPoints(prevStart, prevQuarterViolations, settings.violationPenalties);
     const endingTier = determineTier(endScore, daSettings);
+
 
     // Helper to determine next start based on dynamic settings
     const getNextStart = (tier, daConfig, max) => {
@@ -336,18 +413,24 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
         const startLevel = getTierLevel(startTier);
         const endLevel = getTierLevel(endingTier);
 
+
+
         // "As long as they do not drop into the Severe Stage (two tiers down)..."
         // Logic: If they drop 2 or more levels, they fail clean slate.
         if (startLevel - endLevel >= 2) {
+
             return nextStart; // Failed clean slate, use standard rollover
         }
 
         if (endingTier.name === TIERS.TERMINATION.name) {
+
             return 0;
         }
 
+
         return maxPoints; // Success clean slate
     }
+
 
     // Standard Rollover
     return nextStart;

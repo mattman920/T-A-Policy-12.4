@@ -1,6 +1,11 @@
+
 [[edge_functions]]
   function = "fireproof"
   path = "/fireproof"
+
+[[edge_functions]]
+  function = "ping"
+  path = "/ping"
 
 [[headers]]
   for = "/*"

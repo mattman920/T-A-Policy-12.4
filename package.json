@@ -23,6 +23,7 @@
     "@supabase/supabase-js": "^2.85.0",
     "jspdf": "^3.0.4",
     "jspdf-autotable": "^5.0.2",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.554.0",
     "papaparse": "^5.5.3",
     "pg": "^8.16.3",

@@ -1,11 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { Save, Upload, Download, Moon, Sun, Building, AlertCircle, AlertTriangle, ChevronRight, RotateCcw, X } from 'lucide-react';
+import { Save, Upload, Download, Moon, Sun, Building, AlertCircle, AlertTriangle, ChevronRight, RotateCcw, X, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const Settings = () => {
-    const { data, updateSettings, exportDatabase, importDatabase, reload } = useData();
+    const { data, updateSettings, exportDatabase, importDatabase, reload, purgeOrphanedViolations } = useData();
     const { isDark, toggleTheme } = useTheme();
     const [importStatus, setImportStatus] = useState('');
     const [testStatus, setTestStatus] = useState('idle'); // idle, testing, success, mock, error
@@ -34,29 +34,6 @@ const Settings = () => {
             setImportStatus(`Error: ${result.error}`);
         }
         e.target.value = null;
-    };
-
-    const handleResetDatabase = async () => {
-        if (!confirm('WARNING: This will completely WIPE the local database and localStorage. Only do this if you are experiencing synchronization errors. Are you sure?')) {
-            return;
-        }
-
-        try {
-            // Clear IndexedDB
-            const dbs = await window.indexedDB.databases();
-            for (const db of dbs) {
-                window.indexedDB.deleteDatabase(db.name);
-            }
-
-            // Clear LocalStorage (often holds Fireproof keys/identity)
-            localStorage.clear();
-
-            alert('Database and LocalStorage cleared. Reloading...');
-            window.location.reload();
-        } catch (error) {
-            console.error('Error clearing database:', error);
-            alert('Failed to clear database. Please try manually in DevTools.');
-        }
     };
 
     const sectionStyle = {
@@ -351,6 +328,8 @@ const Settings = () => {
                                     color: 'var(--text-primary)',
                                     fontSize: '0.9rem'
                                 }}
+                                name="geminiApiKey"
+                                id="geminiApiKey"
                             />
                             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
                                 Required for generating AI-powered Health Check reports.
@@ -514,8 +493,17 @@ const Settings = () => {
                         <Upload size={20} /> Restore Backup
                     </button>
 
+
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleImport}
+                        accept=".json"
+                        style={{ display: 'none' }}
+                    />
+
                     <button
-                        onClick={handleResetDatabase}
+                        onClick={purgeOrphanedViolations}
                         style={{
                             flex: 1,
                             display: 'flex',
@@ -524,31 +512,81 @@ const Settings = () => {
                             gap: '0.5rem',
                             padding: '1rem',
                             borderRadius: 'var(--radius-md)',
-                            border: '1px solid var(--accent-danger)',
-                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            border: '1px solid var(--accent-warning)',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
                             cursor: 'pointer',
-                            color: 'var(--accent-danger)',
+                            color: 'var(--accent-warning)',
                             fontWeight: '500',
                             minWidth: '200px'
                         }}
                     >
-                        <RotateCcw size={20} /> Reset Database
+                        <AlertTriangle size={20} /> Fix Import Issues
                     </button>
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleImport}
-                        accept=".json"
-                        style={{ display: 'none' }}
-                    />
                 </div>
-                {importStatus && (
-                    <p style={{ marginTop: '1rem', textAlign: 'center', fontWeight: '500', color: importStatus.includes('Error') ? 'red' : 'green' }}>
-                        {importStatus}
-                    </p>
-                )}
+                {
+                    importStatus && (
+                        <p style={{ marginTop: '1rem', textAlign: 'center', fontWeight: '500', color: importStatus.includes('Error') ? 'red' : 'green' }}>
+                            {importStatus}
+                        </p>
+                    )
+                }
             </section>
-        </div>
+
+            {/* Danger Zone Section */}
+            <section style={{ ...sectionStyle, borderColor: 'var(--accent-danger)' }}>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-danger)' }}>
+                    <AlertTriangle size={20} /> Danger Zone
+                </h2>
+
+                <div style={{ padding: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                    <h3 style={{ color: 'var(--accent-danger)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                        <Trash2 size={18} /> Irreversible Actions
+                    </h3>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                        The actions below are destructive and cannot be undone. Please proceed with extreme caution.
+                    </p>
+                </div>
+
+                <button
+                    onClick={() => {
+                        if (confirm("CRITICAL WARNING: You are about to perform a NUCLEAR RESET.\n\nThis will permanently DELETE ALL DATA from the database, including all employees, violations, and settings.\n\nThis action CANNOT be undone.\n\nAre you absolutely sure you want to proceed?")) {
+                            if (confirm("Final Confirmation: This will wipe the entire application backend. You will start with a fresh database.\n\nClick OK to DELETE EVERYTHING.")) {
+                                nuclearReset();
+                            }
+                        }
+                    }}
+                    style={{
+                        ...navButtonStyle,
+                        borderColor: 'var(--accent-danger)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.05)'
+                    }}
+                    onMouseOver={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+                    }}
+                    onMouseOut={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.05)';
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div style={{
+                            padding: '0.75rem',
+                            backgroundColor: 'var(--bg-secondary)',
+                            borderRadius: '50%',
+                            color: 'var(--accent-danger)'
+                        }}>
+                            <Trash2 size={24} />
+                        </div>
+                        <div>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--accent-danger)', marginBottom: '0.25rem' }}>Nuclear Reset</h3>
+                            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Permanently delete all data and start fresh</p>
+                        </div>
+                    </div>
+                    <ChevronRight size={20} color="var(--text-secondary)" />
+                </button>
+            </section>
+        </div >
     );
 };
 

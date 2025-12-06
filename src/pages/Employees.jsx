@@ -1,20 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../contexts/DataContext';
 import Modal from '../components/Modal';
-import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, STARTING_POINTS, calculateDeductions } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, STARTING_POINTS, calculateDeductions, VIOLATION_TYPES, parseDate } from '../utils/pointCalculator';
 import { getCurrentQuarterDates, getQuarterKey } from '../utils/dateUtils';
 import { Search, Upload, Archive, UserPlus, FileText, Filter, Trash2 } from 'lucide-react';
 import Papa from 'papaparse';
 
 const Employees = () => {
     const { data, loading, addEmployee, addViolation, updateEmployee, deleteEmployee } = useData();
-
-    useEffect(() => {
-        console.log('Employees MOUNTED');
-        return () => console.log('Employees UNMOUNTED');
-    }, []);
-
-    console.log('Employees RENDERED');
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isViolationModalOpen, setIsViolationModalOpen] = useState(false);
@@ -143,18 +136,132 @@ const Employees = () => {
     };
 
     const filteredEmployees = data.employees.filter(emp => {
-        const matchesSearch = emp.name.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesSearch = emp.name?.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesArchive = showArchived ? emp.archived : !emp.archived;
         return matchesSearch && matchesArchive;
     });
 
-    if (loading) return <div>Loading...</div>;
+    const employeeCards = React.useMemo(() => {
+        return filteredEmployees.map(employee => {
+            try {
+                const { startDate, endDate } = getCurrentQuarterDates();
+                const empViolations = data.violations.filter(v => {
+                    const vDate = parseDate(v.date);
+                    return v.employeeId === employee.id && vDate >= startDate && vDate <= endDate;
+                });
+                const allEmpViolations = data.violations.filter(v => v.employeeId === employee.id);
+                const qKey = getQuarterKey();
+                const startPoints = calculateQuarterlyStart(qKey, allEmpViolations, data.settings);
+                const points = calculateCurrentPoints(startPoints, empViolations, data.settings.violationPenalties);
+                const tier = determineTier(points, data.settings.daSettings);
 
-    console.log('Employees Render Debug:', {
-        employeesCount: data.employees?.length,
-        settings: data.settings,
-        daSettings: data.settings?.daSettings
-    });
+                return (
+                    <div key={employee.id} style={{
+                        backgroundColor: 'var(--bg-secondary)',
+                        padding: '1.5rem',
+                        borderRadius: 'var(--radius-lg)',
+                        boxShadow: 'var(--shadow-md)',
+                        border: '1px solid var(--border-color)',
+                        opacity: employee.archived ? 0.7 : 1
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                            <div>
+                                <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.25rem' }}>{employee.name}</h3>
+                                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Started: {new Date(employee.startDate).toLocaleDateString()}</p>
+                            </div>
+                            <div style={{
+                                padding: '0.25rem 0.75rem',
+                                borderRadius: '9999px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                backgroundColor: tier.color + '20',
+                                color: tier.color
+                            }}>
+                                {points} pts
+                            </div>
+                        </div>
+
+                        <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
+                                <span style={{ color: 'var(--text-secondary)' }}>Status</span>
+                                <span style={{ fontWeight: 500, color: tier.color }}>{tier.name}</span>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button
+                                onClick={() => openViolationModal(employee)}
+                                disabled={employee.archived}
+                                style={{
+                                    flex: 1,
+                                    padding: '0.5rem',
+                                    borderRadius: 'var(--radius-md)',
+                                    border: '1px solid var(--border-color)',
+                                    backgroundColor: 'transparent',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 500,
+                                    cursor: employee.archived ? 'not-allowed' : 'pointer',
+                                    opacity: employee.archived ? 0.5 : 1
+                                }}
+                            >
+                                Log Violation
+                            </button>
+                            <button
+                                onClick={() => handleEditClick(employee)}
+                                title="Edit Employee"
+                                style={{
+                                    padding: '0.5rem',
+                                    borderRadius: 'var(--radius-md)',
+                                    border: '1px solid var(--border-color)',
+                                    backgroundColor: 'transparent',
+                                    color: 'var(--text-secondary)',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <FileText size={18} />
+                            </button>
+                            <button
+                                onClick={() => toggleArchive(employee)}
+                                title={employee.archived ? "Unarchive" : "Archive"}
+                                style={{
+                                    padding: '0.5rem',
+                                    borderRadius: 'var(--radius-md)',
+                                    border: '1px solid var(--border-color)',
+                                    backgroundColor: 'transparent',
+                                    color: 'var(--text-secondary)',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <Archive size={18} />
+                            </button>
+                            {employee.archived && (
+                                <button
+                                    onClick={() => handleDeleteEmployee(employee)}
+                                    title="Permanently Delete"
+                                    style={{
+                                        padding: '0.5rem',
+                                        borderRadius: 'var(--radius-md)',
+                                        border: '1px solid var(--accent-danger)',
+                                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                        color: 'var(--accent-danger)',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    <Trash2 size={18} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                );
+            } catch (e) {
+                console.error('Error rendering employee:', employee, e);
+                return <div key={employee.id}>Error rendering employee {employee.name}</div>;
+            }
+        });
+    }, [filteredEmployees, data.violations, data.settings]);
+
+    if (loading) return <div>Loading...</div>;
 
     return (
         <div>
@@ -258,124 +365,7 @@ const Employees = () => {
                 gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
                 gap: '1.5rem'
             }}>
-                {React.useMemo(() => {
-                    return filteredEmployees.map(employee => {
-                        try {
-                            const { startDate, endDate } = getCurrentQuarterDates();
-                            const empViolations = data.violations.filter(v => {
-                                const vDate = new Date(v.date);
-                                return v.employeeId === employee.id && vDate >= startDate && vDate <= endDate;
-                            });
-                            const qKey = getQuarterKey();
-                            const startPoints = calculateQuarterlyStart(qKey, data.violations, data.settings);
-                            const points = calculateCurrentPoints(startPoints, empViolations, data.settings.violationPenalties);
-                            const tier = determineTier(points, data.settings.daSettings);
-
-                            return (
-                                <div key={employee.id} style={{
-                                    backgroundColor: 'var(--bg-secondary)',
-                                    padding: '1.5rem',
-                                    borderRadius: 'var(--radius-lg)',
-                                    boxShadow: 'var(--shadow-md)',
-                                    border: '1px solid var(--border-color)',
-                                    opacity: employee.archived ? 0.7 : 1
-                                }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                                        <div>
-                                            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '0.25rem' }}>{employee.name}</h3>
-                                            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Started: {new Date(employee.startDate).toLocaleDateString()}</p>
-                                        </div>
-                                        <div style={{
-                                            padding: '0.25rem 0.75rem',
-                                            borderRadius: '9999px',
-                                            fontSize: '0.75rem',
-                                            fontWeight: 600,
-                                            backgroundColor: tier.color + '20',
-                                            color: tier.color
-                                        }}>
-                                            {points} pts
-                                        </div>
-                                    </div>
-
-                                    <div style={{ marginBottom: '1rem' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                                            <span style={{ color: 'var(--text-secondary)' }}>Status</span>
-                                            <span style={{ fontWeight: 500, color: tier.color }}>{tier.name}</span>
-                                        </div>
-                                    </div>
-
-                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                        <button
-                                            onClick={() => openViolationModal(employee)}
-                                            disabled={employee.archived}
-                                            style={{
-                                                flex: 1,
-                                                padding: '0.5rem',
-                                                borderRadius: 'var(--radius-md)',
-                                                border: '1px solid var(--border-color)',
-                                                backgroundColor: 'transparent',
-                                                color: 'var(--text-primary)',
-                                                fontSize: '0.875rem',
-                                                fontWeight: 500,
-                                                cursor: employee.archived ? 'not-allowed' : 'pointer',
-                                                opacity: employee.archived ? 0.5 : 1
-                                            }}
-                                        >
-                                            Log Violation
-                                        </button>
-                                        <button
-                                            onClick={() => handleEditClick(employee)}
-                                            title="Edit Employee"
-                                            style={{
-                                                padding: '0.5rem',
-                                                borderRadius: 'var(--radius-md)',
-                                                border: '1px solid var(--border-color)',
-                                                backgroundColor: 'transparent',
-                                                color: 'var(--text-secondary)',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            <FileText size={18} />
-                                        </button>
-                                        <button
-                                            onClick={() => toggleArchive(employee)}
-                                            title={employee.archived ? "Unarchive" : "Archive"}
-                                            style={{
-                                                padding: '0.5rem',
-                                                borderRadius: 'var(--radius-md)',
-                                                border: '1px solid var(--border-color)',
-                                                backgroundColor: 'transparent',
-                                                color: 'var(--text-secondary)',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            <Archive size={18} />
-                                        </button>
-                                        {employee.archived && (
-                                            <button
-                                                onClick={() => handleDeleteEmployee(employee)}
-                                                title="Permanently Delete"
-                                                style={{
-                                                    padding: '0.5rem',
-                                                    borderRadius: 'var(--radius-md)',
-                                                    border: '1px solid var(--accent-danger)',
-                                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                                    color: 'var(--accent-danger)',
-                                                    cursor: 'pointer'
-                                                }}
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        } catch (e) {
-                            console.error('Error rendering employee:', employee, e);
-                            return <div key={employee.id}>Error rendering employee {employee.name}</div>;
-                        }
-                    });
-                }, [filteredEmployees, data.violations, data.settings])}
+                {employeeCards}
             </div>
 
             <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add New Employee">
@@ -534,7 +524,7 @@ const Employees = () => {
                             <option value="Tardy (6-11 min)">Tardy (6-11 min)</option>
                             <option value="Tardy (12-29 min)">Tardy (12-29 min)</option>
                             <option value="Tardy (30+ min)">Tardy (30+ min)</option>
-                            <option value="Callout">Callout</option>
+                            <option value={VIOLATION_TYPES.CALLOUT}>{VIOLATION_TYPES.CALLOUT}</option>
                         </select>
                     </div>
                     <div>
