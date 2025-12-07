@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Modal from './Modal';
 import { useData } from '../contexts/DataContext';
-import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, TIERS } from '../utils/pointCalculator';
+import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, TIERS, parseDate } from '../utils/pointCalculator';
 import { getQuarterKey } from '../utils/dateUtils';
 import Papa from 'papaparse';
 import { jsPDF } from 'jspdf';
@@ -113,7 +113,7 @@ const EMDReportModal = ({ isOpen, onClose }) => {
 
                     // Filter violations to be within this quarter AND up to report date
                     const relevantViolations = empViolations.filter(v => {
-                        const vDate = new Date(v.date);
+                        const vDate = parseDate(v.date);
                         return vDate >= quarterStartDate && vDate <= reportDate;
                     });
                     const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
