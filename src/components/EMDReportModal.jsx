@@ -98,6 +98,7 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                 if (!employee) return null;
 
                 let currentPoints = 0;
+                let startPoints = 0;
 
                 if (employee) {
                     const empViolations = data.violations.filter(v => v.employeeId === employee.id);
@@ -110,13 +111,21 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                     const qYear = parseInt(qYearStr);
                     const qQuarter = parseInt(qStr.replace('Q', ''));
                     const quarterStartDate = new Date(qYear, (qQuarter - 1) * 3, 1);
+                    // Revert to Report Date as requested by user ("last day of report")
+                    // const quarterEndDate = new Date(qYear, qQuarter * 3, 0, 23, 59, 59, 999);
+
+
 
                     // Filter violations to be within this quarter AND up to report date
                     const relevantViolations = empViolations.filter(v => {
                         const vDate = parseDate(v.date);
-                        return vDate >= quarterStartDate && vDate <= reportDate;
+                        const inRange = vDate >= quarterStartDate && vDate <= reportDate;
+                        return inRange;
                     });
-                    const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
+
+
+
+                    startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
                     currentPoints = calculateCurrentPoints(startPoints, relevantViolations, data.settings.violationPenalties);
                 }
 
@@ -132,6 +141,8 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                 // B. Deduction
                 // Use determineTier to get the tier effectively used in the Scorecard
                 const tier = determineTier(currentPoints, data.settings.daSettings);
+
+
 
                 let deductionPercent = 0;
 
@@ -280,7 +291,7 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                         <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Month</label>
                         <select
                             value={selectedMonth}
-                            onChange={(e) => setSelectedMonth(e.target.value)}
+                            onChange={(e) => setSelectedMonth(parseInt(e.target.value, 10))}
                             style={{ width: '100%', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '1rem' }}
                         >
                             {Array.from({ length: 12 }, (_, i) => (
@@ -292,7 +303,7 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                         <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Year</label>
                         <select
                             value={selectedYear}
-                            onChange={(e) => setSelectedYear(e.target.value)}
+                            onChange={(e) => setSelectedYear(parseInt(e.target.value, 10))}
                             style={{ width: '100%', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', fontSize: '1rem' }}
                         >
                             {Array.from({ length: 5 }, (_, i) => {
