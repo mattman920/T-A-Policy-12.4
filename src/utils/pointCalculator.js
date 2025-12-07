@@ -43,7 +43,7 @@ export const DEFAULT_POSITIVE_ADJUSTMENTS = {
  * @returns {Date}
  */
 export const parseDate = (dateStr) => {
-    if (!dateStr) return new Date();
+    if (!dateStr) return new Date('Invalid');
 
     // Handle MM/DD/YYYY or DD/MM/YYYY (slashes)
     if (dateStr.includes('/')) {
@@ -295,36 +295,8 @@ export function calculateQuarterlyStart(targetQuarterKey, allViolations, setting
     }
     const prevQuarterKey = `${prevYear}-Q${prevQ}`;
 
-    // Helper to safely parse date string to local date object
-    const parseDate = (dateStr) => {
-        if (!dateStr) return new Date();
-
-        // Handle MM/DD/YYYY or DD/MM/YYYY (slashes)
-        if (dateStr.includes('/')) {
-            const parts = dateStr.split('/');
-            if (parts.length === 3) {
-                const d = new Date(dateStr);
-                if (!isNaN(d.getTime())) return d;
-            }
-        }
-
-        // Handle MM-DD-YYYY or M-D-YYYY (dashes)
-        if (dateStr.includes('-')) {
-            const parts = dateStr.split('-');
-            // If we have 3 parts and the last one is a year (4 digits)
-            if (parts.length === 3 && parts[2].length === 4) {
-                const [p1, p2, p3] = parts;
-                // Pad single digits with 0
-                const m = p1.length === 1 ? `0${p1}` : p1;
-                const d = p2.length === 1 ? `0${p2}` : p2;
-                // Reformat to YYYY-MM-DD for consistent parsing
-                return new Date(`${p3}-${m}-${d}T00:00:00`);
-            }
-        }
-
-        if (dateStr.includes('T')) return new Date(dateStr);
-        return new Date(`${dateStr}T00:00:00`);
-    };
+    // Helper to safely parse date string to local date object - REMOVED (Use exported parseDate)
+    // const parseDate = ...
 
     // Base Case: Check history
     const hasHistory = allViolations.some(v => {
