@@ -37,6 +37,85 @@ ipcMain.handle('write-data', async (event, data) => {
     }
 });
 
+// Generate PDF Handler (Hidden Window)
+ipcMain.handle('generate-pdf', async (event, { payload, type }) => {
+    const win = BrowserWindow.fromWebContents(event.sender); // Parent window
+
+    // Determine route based on type
+    let route = '';
+    if (type === 'health-check') {
+        route = '/print/health-check';
+    } else {
+        return { success: false, error: 'Unknown report type' };
+    }
+
+    // Create hidden window
+    const hiddenWin = new BrowserWindow({
+        show: false,
+        width: 794, // 210mm approx at 96dpi (A4 width)
+        height: 1123, // 297mm approx
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true
+        }
+    });
+
+    const isDev = !app.isPackaged;
+    const loadUrl = isDev
+        ? `http://localhost:5173/#${route}`
+        : `file://${path.join(__dirname, '../dist/index.html')}#${route}`;
+
+    console.log(`[PDF] Loading hidden window: ${loadUrl}`);
+
+    try {
+        await hiddenWin.loadURL(loadUrl);
+
+        // Wait for connection/render
+        // Send data
+        console.log('[PDF] Page loaded, sending data...');
+        hiddenWin.webContents.send('print-data', payload);
+
+        // Give React a moment to render state (can use ipc acknowledgment but delay is easier for v1)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        console.log('[PDF] Printing...');
+        const pdfData = await hiddenWin.webContents.printToPDF({
+            printBackground: true,
+            landscape: false,
+            pageSize: 'A4',
+            margins: { top: 0, bottom: 0, left: 0, right: 0 } // handled by CSS padding
+        });
+
+        // Prompt user to save
+        const { dialog } = require('electron');
+        const defaultName = payload.aiContext.name
+            ? `${payload.aiContext.name.replace(/\s+/g, '_')}_HealthCheck.pdf`
+            : 'HealthCheck.pdf';
+
+        const saveResult = await dialog.showSaveDialog(win, {
+            title: 'Save PDF',
+            defaultPath: defaultName,
+            filters: [{ name: 'PDF', extensions: ['pdf'] }]
+        });
+
+        if (!saveResult.canceled) {
+            fs.writeFileSync(saveResult.filePath, pdfData);
+            hiddenWin.close();
+            return { success: true, filePath: saveResult.filePath };
+        } else {
+            hiddenWin.close();
+            return { success: false, canceled: true };
+        }
+
+    } catch (error) {
+        console.error('[PDF] Error generating PDF:', error);
+        if (!hiddenWin.isDestroyed()) hiddenWin.close();
+        return { success: false, error: error.message };
+    }
+});
+
 // Print handler
 ipcMain.handle('print', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -136,7 +215,7 @@ function createWindow() {
             responseHeaders: {
                 ...details.responseHeaders,
                 'Content-Security-Policy': [
-                    "default-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com https://unpkg.com http://localhost:8888; object-src 'self' blob:;"
+                    "default-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com https://unpkg.com http://localhost:8888 http://localhost:5173 ws://localhost:5173; object-src 'self' blob:;"
                 ]
             }
         });

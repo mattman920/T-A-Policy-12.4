@@ -242,3 +242,153 @@ button {
     print-color-adjust: exact !important;
   }
 }
+
+/* =========================================
+   Modern Date Picker Styles (Appended Fix)
+   ========================================= */
+
+/* Input Wrapper - Matches Select/Shift inputs */
+.modern-datepicker-input-wrapper {
+  display: flex !important;
+  align-items: center;
+  gap: 0.75rem;
+  background-color: #343434;
+  /* Dark background match */
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  /* Match radius-md */
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  cursor: pointer;
+  width: 100%;
+}
+
+.modern-datepicker-input-wrapper:hover {
+  background-color: #404040;
+}
+
+/* Icon */
+.modern-datepicker-icon {
+  color: #a3a3a3;
+}
+
+/* Actual input field */
+.modern-datepicker-input {
+  background: transparent;
+  border: none;
+  color: #fafafa;
+  font-size: inherit;
+  font-family: inherit;
+  width: 100%;
+  cursor: pointer;
+  outline: none;
+}
+
+.modern-datepicker-input::placeholder {
+  color: #737373;
+}
+
+/* Label */
+.modern-datepicker-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #a3a3a3;
+  margin-bottom: 0.5rem;
+}
+
+/* =========================================
+   React Datepicker Override (Force Dark Mode)
+   ========================================= */
+
+/* Ensure the wrapper fills the width of the container */
+.react-datepicker-wrapper,
+.react-datepicker__input-container {
+  display: block;
+  width: 100%;
+}
+
+.react-datepicker {
+  font-family: 'Inter', sans-serif !important;
+  background-color: #171717 !important;
+  /* bg-sidebar */
+  border: 1px solid #404040 !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.5) !important;
+  color: #fafafa !important;
+}
+
+.react-datepicker__header {
+  background-color: #262626 !important;
+  /* bg-secondary */
+  border-bottom: 1px solid #404040 !important;
+  border-radius: 0.75rem 0.75rem 0 0 !important;
+  padding-top: 10px !important;
+}
+
+.react-datepicker__current-month,
+.react-datepicker__day-name {
+  color: #fafafa !important;
+}
+
+.react-datepicker__day {
+  color: #e5e5e5 !important;
+}
+
+.react-datepicker__day:hover {
+  background-color: #404040 !important;
+  border-radius: 50%;
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--keyboard-selected {
+  background-color: #dc2626 !important;
+  /* accent-primary */
+  color: white !important;
+  border-radius: 50%;
+}
+
+.react-datepicker__day--disabled {
+  color: #525252 !important;
+}
+
+.react-datepicker__triangle {
+  display: none !important;
+}
+
+.react-datepicker__navigation-icon::before {
+  border-color: #a3a3a3 !important;
+}
+
+
+/* =========================================
+   Date Picker Refinements (Width & Z-Index)
+   ========================================= */
+
+/* Ensure the outer container fills the parent slot */
+.modern-datepicker-container {
+  width: 100%;
+  display: block;
+}
+
+/* Ensure the popup is always on top (fixes Scorecard/Table issue) */
+.modern-datepicker-popper {
+  z-index: 9999 !important;
+}
+
+/* Ensure the wrapper respects box model for perfect alignment */
+.modern-datepicker-input-wrapper {
+  box-sizing: border-box;
+  /* Ensure padding doesn't add to width */
+  width: 100% !important;
+}
+
+/* Specific fix for the calendar icon alignment if needed */
+.modern-datepicker-icon {
+  flex-shrink: 0;
+}
+
+/* Centering utility for inputs */
+.text-center-input {
+  text-align: center !important;
+}

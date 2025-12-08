@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
+import { DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTY, SURGE_CALLOUT_PENALTY, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
 
 const STORAGE_KEY = 'attendance_tracker_local_data';
 
@@ -8,7 +8,8 @@ const DEFAULT_SETTINGS = {
     startingPoints: 25,
     violationPenalties: {
         tardy: DEFAULT_TARDY_PENALTIES,
-        callout: DEFAULT_CALLOUT_PENALTIES,
+        calloutStandard: DEFAULT_CALLOUT_PENALTY,
+        calloutSurge: SURGE_CALLOUT_PENALTY,
         positiveAdjustments: DEFAULT_POSITIVE_ADJUSTMENTS
     },
     reportUsage: {},

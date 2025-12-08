@@ -11,12 +11,27 @@ export function useDB() {
 
     if (existingDb) {
         dbName = existingDb;
+        localStorage.setItem('last_active_db', dbName);
     } else {
-        // Use a fixed database name for persistence
-        dbName = 'attendance-tracker-v9';
+        // Check for last active DB or use default
+        const lastActive = localStorage.getItem('last_active_db');
+        dbName = lastActive || 'attendance-tracker-v11';
+
         const newUrl = new URL(window.location);
         newUrl.searchParams.set('db', dbName);
         window.history.replaceState(null, '', newUrl.toString());
+    }
+
+    // Antigravity: Track known databases for Settings page
+    try {
+        const stored = localStorage.getItem('available_databases');
+        let dbs = stored ? JSON.parse(stored) : [];
+        if (!dbs.includes(dbName)) {
+            dbs.push(dbName);
+            localStorage.setItem('available_databases', JSON.stringify(dbs));
+        }
+    } catch (e) {
+        console.warn('Failed to update available_databases list:', e);
     }
 
     const { database, useLiveQuery } = useFireproof(dbName);
@@ -37,8 +52,8 @@ export function useDB() {
                 if (window.location.hostname === 'localhost') {
                     origin = 'http://localhost:8888';
                 }
+
                 const netlifyUrl = origin.replace(/^https?/, 'netlify');
-                console.log('Fireproof connecting to:', netlifyUrl, 'with db:', dbName);
                 const connection = await connect(database, dbName, netlifyUrl);
                 connectionRef.current = dbName;
                 setConnected(true);
@@ -46,26 +61,34 @@ export function useDB() {
                 // Debug: Check if data is actually in the DB with polling
                 let attempts = 0;
                 const checkData = async () => {
-                    const allDocs = await database.allDocs();
-
-                    if (allDocs.rows.length > 0) {
-                        // Repair data if needed
-                        for (const row of allDocs.rows) {
-                            const doc = row.value;
-                            const sanitized = deepSanitize(doc);
-                            // Simple check: if JSON stringify differs, it needed sanitization
-                            if (JSON.stringify(doc) !== JSON.stringify(sanitized)) {
-                                await database.put(sanitized);
+                    try {
+                        const allDocs = await database.allDocs();
+                        if (allDocs.rows.length > 0) {
+                            // Repair data if needed
+                            for (const row of allDocs.rows) {
+                                const doc = row.value;
+                                const sanitized = deepSanitize(doc);
+                                // Simple check: if JSON stringify differs, it needed sanitization
+                                if (JSON.stringify(doc) !== JSON.stringify(sanitized)) {
+                                    await database.put(sanitized);
+                                }
                             }
+                        } else if (attempts < 10) { // Increased max retries for empty db check
+                            attempts++;
+                            setTimeout(checkData, 1000);
+                        }
+                    } catch (e) {
+                        console.warn(`useDB: Connection verification failed (attempt ${attempts + 1}/10):`, e.message);
+                        if (attempts < 10) {
+                            attempts++;
+                            // Retry faster on error than on empty data
+                            setTimeout(checkData, 1500);
+                        } else {
+                            console.error('useDB: Connection verification gave up after 10 attempts.');
                         }
                     }
-
-                    if (allDocs.rows.length === 0 && attempts < 5) {
-                        attempts++;
-                        setTimeout(checkData, 1000);
-                    }
                 };
-                checkData().catch(e => console.error('Error in checkData:', e));
+                checkData();
             } catch (error) {
                 console.error('Fireproof connect failed:', error);
                 setConnected(true); // Allow to proceed even if connect fails (offline mode)

@@ -2,12 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { useData } from '../contexts/DataContext';
 import { Users, CheckCircle, AlertTriangle, TrendingDown } from 'lucide-react';
 import StatCard from '../components/StatCard';
-import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, STARTING_POINTS, TIERS, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { determineTier, STARTING_POINTS, TIERS, VIOLATION_TYPES } from '../utils/pointCalculator';
 import { getRequiredDAs } from '../services/daService';
 import { getQuarterKey } from '../utils/dateUtils';
 import { useNavigate } from 'react-router-dom';
 
-import TierBreakdown from '../components/TierBreakdown';
+import SimpleTierBreakdown from '../components/SimpleTierBreakdown';
+import DABreakdown from '../components/DABreakdown';
 import TerminationsReportModal from '../components/TerminationsReportModal';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -56,11 +57,12 @@ const Dashboard = () => {
   // "Negative" violations only (for charts, trends, and problem lists)
   const violations = allActiveViolations.filter(v => !POSITIVE_TYPES.includes(v.type));
 
-  const { totalEmployees, severeCount, finalCount, goodStandingCount, coachingCount, terminationCount } = useMemo(() => {
+  const { totalEmployees, severeCount, finalCount, goodStandingCount, coachingCount, educationalCount, terminationCount } = useMemo(() => {
     let severe = 0;
     let final = 0;
     let good = 0;
     let coaching = 0;
+    let educational = 0;
     let terminations = 0;
 
     // Get issued DAs from data context
@@ -79,7 +81,8 @@ const Dashboard = () => {
       const required = getRequiredDAs(emp, allViolations, data.settings, issuedDAs);
 
       required.forEach(da => {
-        if (da.tier === TIERS.COACHING.name) coaching++;
+        if (da.tier === TIERS.EDUCATIONAL.name) educational++;
+        else if (da.tier === TIERS.COACHING.name) coaching++;
         else if (da.tier === TIERS.SEVERE.name) severe++;
         else if (da.tier === TIERS.FINAL.name) final++;
         // We don't typically count "Termination" in "Action Required" stats if it's already in "Terminations" count,
@@ -96,13 +99,8 @@ const Dashboard = () => {
 
       // Also calculate current standing for "Good Standing" count
       // This is separate from "Action Required" history
-      const qKey = getQuarterKey();
-      const startPoints = calculateQuarterlyStart(qKey, allViolations, data.settings);
-      const empViolations = allActiveViolations.filter(v => v.employeeId === emp.id);
-      const points = calculateCurrentPoints(startPoints, empViolations, data.settings.violationPenalties);
-      const tier = determineTier(points, data.settings.daSettings);
-
-      if (tier.name === TIERS.GOOD.name) {
+      // Use pre-calculated tier from Context
+      if (emp.tier === TIERS.GOOD.name) {
         good++;
       }
     });
@@ -113,6 +111,7 @@ const Dashboard = () => {
       finalCount: final,
       goodStandingCount: good,
       coachingCount: coaching,
+      educationalCount: educational,
       terminationCount: terminations
     };
   }, [employees, violations, data?.issuedDAs, allEmployees, allActiveViolations, data.settings]);
@@ -150,13 +149,9 @@ const Dashboard = () => {
   const problemEmployees = useMemo(() => {
     return employees.map(emp => {
       const empViolations = violations.filter(v => v.employeeId === emp.id);
-      const allEmpViolations = allActiveViolations.filter(v => v.employeeId === emp.id);
-      const qKey = getQuarterKey();
-      const startPoints = calculateQuarterlyStart(qKey, allViolations, data.settings);
-      const points = calculateCurrentPoints(startPoints, allEmpViolations, data.settings.violationPenalties);
       return {
         ...emp,
-        points,
+        points: emp.currentPoints || 0,
         violationCount: empViolations.length
       };
     })
@@ -215,7 +210,7 @@ const Dashboard = () => {
         />
         <StatCard
           title="Action Required"
-          value={coachingCount + severeCount + finalCount}
+          value={educationalCount + coachingCount + severeCount + finalCount}
           icon={AlertTriangle}
           color="var(--accent-warning)"
           onClick={() => navigate('/da-issuance')}
@@ -235,9 +230,14 @@ const Dashboard = () => {
         employees={allEmployees}
       />
 
-      {/* Tier Breakdown */}
+      {/* Tier Breakdown (Simple) */}
       <div style={{ marginBottom: '2rem' }}>
-        <TierBreakdown employees={employees} violations={violations} startingPoints={data.settings.startingPoints} daSettings={data.settings.daSettings} />
+        <SimpleTierBreakdown employees={employees} violations={violations} />
+      </div>
+
+      {/* Employee DA Breakdown (Complex/Sticky) */}
+      <div style={{ marginBottom: '2rem' }}>
+        <DABreakdown employees={employees} violations={violations} />
       </div>
 
       {/* Charts Row */}
@@ -280,7 +280,7 @@ const Dashboard = () => {
                   ))}
                 </Pie>
                 <Tooltip />
-                <Legend />
+
               </PieChart>
             </ResponsiveContainer>
           </div>

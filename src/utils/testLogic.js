@@ -1,18 +1,9 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
-    STARTING_POINTS,
+    calculateEmployeeState,
     TIERS,
-    VIOLATION_TYPES,
-    DEFAULT_TARDY_PENALTIES,
-    DEFAULT_CALLOUT_PENALTIES,
-    DEFAULT_POSITIVE_ADJUSTMENTS,
-    calculateDeductions,
-    calculatePositiveAdjustments,
-    calculateCurrentPoints,
-    determineTier,
-    calculateMonthlyBonus
-    // calculateNextQuarterStart
+    VIOLATION_TYPES
 } from './pointCalculator';
 
 export const runTestsAndDownloadReport = () => {
@@ -26,106 +17,118 @@ export const runTestsAndDownloadReport = () => {
         results.push({ category, testName, expected, actual, passed, details });
     };
 
-    // --- Configuration Verification ---
-    addResult('Configuration', 'Starting Points', 25, STARTING_POINTS, STARTING_POINTS === 25, 'Default starting points check');
-    addResult('Configuration', 'Good Standing Min', 125, TIERS.GOOD.min, TIERS.GOOD.min === 125);
-    addResult('Configuration', 'Coaching Min', 85, TIERS.COACHING.min, TIERS.COACHING.min === 85);
-    addResult('Configuration', 'Severe Min', 50, TIERS.SEVERE.min, TIERS.SEVERE.min === 50);
-    addResult('Configuration', 'Final Min', 1, TIERS.FINAL.min, TIERS.FINAL.min === 1);
+    const mockSettings = {
+        stabilizationDays: 90,
+        calloutSurgeLookbackDays: 14,
+        surgeDeductionPoints: 30,
+        standardCalloutDeduction: 15,
+        violationPenalties: {
+            callout: [15, 20, 25, 30, 35, 40], // Custom progressive if needed, but Rolling uses fixed or surge
+            tardy: {
+                [VIOLATION_TYPES.TARDY_1_5]: [2, 3, 5, 5],
+                [VIOLATION_TYPES.TARDY_6_11]: [5, 10, 15, 15]
+            },
+            positiveAdjustments: {
+                [VIOLATION_TYPES.EARLY_ARRIVAL]: 1,
+                [VIOLATION_TYPES.SHIFT_PICKUP]: 5
+            }
+        }
+    };
 
-    // --- Deduction Tests ---
-    // Test 1: Single Callout
-    const test1Violations = [{ type: VIOLATION_TYPES.CALLOUT, date: '2025-01-01' }];
-    const test1Actual = calculateDeductions(test1Violations);
-    addResult('Deductions', 'Single Callout (1st)', 15, test1Actual, test1Actual === 15, '1st Callout should be 15 points');
+    const mockEmp = { id: 'test1', name: 'Test User' };
 
-    // Test 2: Multiple Callouts (Progressive)
-    const test2Violations = [
-        { type: VIOLATION_TYPES.CALLOUT, date: '2025-01-01' },
-        { type: VIOLATION_TYPES.CALLOUT, date: '2025-01-02' },
-        { type: VIOLATION_TYPES.CALLOUT, date: '2025-01-03' }
+    // --- Rolling Stabilization Tests ---
+
+    // Test 1: Basic Violation Impact
+    const t1Violations = [{ type: VIOLATION_TYPES.CALLOUT, date: new Date().toISOString() }];
+    const t1State = calculateEmployeeState(mockEmp, t1Violations, mockSettings);
+    // 150 - 15 = 135
+    addResult('Rolling Logic', 'Single Callout', 135, t1State.score, t1State.score === 135, 'Standard deduction');
+
+    // Test 2: Callout Surge (2 in 14 days)
+    const today = new Date();
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const t2Violations = [
+        { type: VIOLATION_TYPES.CALLOUT, date: today.toISOString() },
+        { type: VIOLATION_TYPES.CALLOUT, date: yesterday.toISOString() }
     ];
-    // 15 + 20 + 25 = 60
-    const test2Actual = calculateDeductions(test2Violations);
-    addResult('Deductions', '3 Callouts', 60, test2Actual, test2Actual === 60, '15+20+25 = 60');
+    const t2State = calculateEmployeeState(mockEmp, t2Violations, mockSettings);
+    // 1st: 150 - 15 = 135.
+    // 2nd: Surge Triggered? Yes. 135 - 30 = 105.
+    addResult('Rolling Logic', 'Callout Surge', 105, t2State.score, t2State.score === 105, '15 (Std) + 30 (Surge)');
 
-    // Test 3: Tardy Progression (Same Month)
-    const test3Violations = [
-        { type: VIOLATION_TYPES.TARDY_1_5, date: '2025-01-01' },
-        { type: VIOLATION_TYPES.TARDY_1_5, date: '2025-01-02' },
-        { type: VIOLATION_TYPES.TARDY_1_5, date: '2025-01-03' }
+    // Test 3: Tier Drop Reset
+    // Drop to Coaching (<125). 
+    // 3 Callouts in short span: 15 (135), 30 (105), 30 (75) -> Severe?
+    // Let's try 2 calls: 135, 105 (Coaching).
+    // Drop to Coaching should reset score to Cap of Coaching (124).
+    // Wait, recent logic said "Reset to Ceiling of new Tier".
+    // Coaching Ceiling is 124.
+    // So 1st Callout: 135 (Good).
+    // 2nd Callout: 105 (Would be Coaching).
+    // Logic: If Drop -> Score becomes Tier Max (124).
+    addResult('Tier Logic', 'Drop to Coaching', 124, t2State.score === 124 ? 124 : t2State.score, t2State.score === 124, 'Should reset to Tier Max (124)');
+
+    // Test 4: Stabilization (Violation expires)
+    // 1 Callout 91 days ago.
+    const oldDate = new Date(); oldDate.setDate(today.getDate() - 91);
+    const t4Violations = [{ type: VIOLATION_TYPES.CALLOUT, date: oldDate.toISOString() }];
+    const t4State = calculateEmployeeState(mockEmp, t4Violations, mockSettings);
+    addResult('Rolling Logic', 'Expired Violation', 150, t4State.score, t4State.score === 150, 'Violation > 90 days should produce Good Standing 150');
+
+    // Test 5: Positive Adjustments
+    const t5Violations = [{ type: VIOLATION_TYPES.SHIFT_PICKUP, date: today.toISOString() }];
+    // 150 + 5 = 150 (Cap).
+    const t5State = calculateEmployeeState(mockEmp, t5Violations, mockSettings);
+    addResult('Points', 'Cap at 150', 150, t5State.score, t5State.score === 150, 'Score cannot exceed 150');
+
+    // Test 6: Positive Adjustment recovery
+    // 1 Callout (135), 1 Pickup (+5) -> 140.
+    const t6Violations = [
+        { type: VIOLATION_TYPES.CALLOUT, date: today.toISOString() },
+        { type: VIOLATION_TYPES.SHIFT_PICKUP, date: today.toISOString() }
     ];
-    // 2 + 3 + 5 = 10
-    const test3Actual = calculateDeductions(test3Violations);
-    addResult('Deductions', '3 Tardies (1-5m) in Jan', 10, test3Actual, test3Actual === 10, '2+3+5 = 10');
+    const t6State = calculateEmployeeState(mockEmp, t6Violations, mockSettings);
+    // 150 - 15 = 135; 135 + 5 = 140.
+    addResult('Points', 'Recovery', 140, t6State.score, t6State.score === 140, '150 - 15 + 5 = 140');
 
-    // Test 4: Tardy Reset (Different Months)
-    const test4Violations = [
-        { type: VIOLATION_TYPES.TARDY_1_5, date: '2025-01-01' }, // 2
-        { type: VIOLATION_TYPES.TARDY_1_5, date: '2025-02-01' }  // 2 (reset)
+
+    // Test 7: Tier 1 Reset Logic
+    // Employee in Tier 1 for > 30 days should reset.
+    // Start: 40 days ago.
+    const start40 = new Date(); start40.setDate(today.getDate() - 40);
+    // Violation today (Day 10 of new cycle).
+    // If reset happened at Day 30, points should be 150 before this violation.
+    // Penalty: 15. End Score: 135.
+    // If NO reset happened, points would be 150 - 15 = 135 anyway? 
+    // Wait, if no reset, it's just 150 - 15 = 135.
+    // We need to check the EVENT LOG for the "reset" event.
+    const t7Violations = [{ type: VIOLATION_TYPES.CALLOUT, date: today.toISOString() }];
+    // We need to simulate that they STARTED 40 days ago. 
+    // calculateUserState assumes start date is first violation date OR today if empty? 
+    // Actually `calculateUserState` sets `tierStartDate` from first violation.
+    // So to test reset, we need an INITIAL violation or state set 40 days ago.
+    // Let's add an "initial" violation 40 days ago (e.g. Info or just a small one).
+    // Or we just rely on the fact that if they have a history starting 40 days ago...
+    // Let's perform a dummy violation 40 days ago so start date is set.
+    // BUT that violation calculates points.
+    // Let's say 40 days ago: Callout (-15) -> 135.
+    // 30 days later (Day 30): Reset to 150. (Since 135 is Tier 1 Good Standing).
+    // Today (Day 40, i.e. Day 10 of new cycle): Callout (-15) -> 135.
+    // Net Result: 135.
+    // If NO Reset:
+    // Day 0: 135.
+    // Day 40: Another Callout (-15) -> 120.
+    // So: With Reset -> 135. Without Reset -> 120.
+
+    const t7ViolationsData = [
+        { type: VIOLATION_TYPES.CALLOUT, date: start40.toISOString() },
+        { type: VIOLATION_TYPES.CALLOUT, date: today.toISOString() }
     ];
-    // 2 + 2 = 4
-    const test4Actual = calculateDeductions(test4Violations);
-    addResult('Deductions', 'Tardy Reset Monthly', 4, test4Actual, test4Actual === 4, 'Should reset count each month');
+    const t7State = calculateEmployeeState(mockEmp, t7ViolationsData, mockSettings);
+    // Check for 135.
+    addResult('Tier Logic', 'Tier 1 Reset', 135, t7State.score, t7State.score === 135, 'Day 0 Callout (135) -> Day 30 Reset (150) -> Day 40 Callout (135). If fail (120), reset missing.');
 
-    // --- Positive Adjustment Tests ---
-    const test5Violations = [
-        { type: VIOLATION_TYPES.EARLY_ARRIVAL, date: '2025-01-01' },
-        { type: VIOLATION_TYPES.SHIFT_PICKUP, date: '2025-01-02' }
-    ];
-    // 1 + 5 = 6
-    const test5Actual = calculatePositiveAdjustments(test5Violations);
-    addResult('Positive Adjustments', 'Early Arrival + Pickup', 6, test5Actual, test5Actual === 6, '1+5 = 6');
-
-    // --- Current Points Calculation ---
-    // Start 150, 1 Callout (15), 1 Pickup (5) -> 150 - 15 + 5 = 140
-    const test6Violations = [
-        { type: VIOLATION_TYPES.CALLOUT, date: '2025-01-01' },
-        { type: VIOLATION_TYPES.SHIFT_PICKUP, date: '2025-01-02' }
-    ];
-    const test6Actual = calculateCurrentPoints(150, test6Violations);
-    addResult('Current Points', 'Basic Calculation', 140, test6Actual, test6Actual === 140, '150 - 15 + 5 = 140');
-
-    // Cap Check: Start 150, 1 Pickup (5) -> Should be 150 (max)
-    const test7Violations = [{ type: VIOLATION_TYPES.SHIFT_PICKUP, date: '2025-01-01' }];
-    const test7Actual = calculateCurrentPoints(150, test7Violations);
-    addResult('Current Points', 'Max Cap', 150, test7Actual, test7Actual === 150, 'Should not exceed 150');
-
-    // --- Tier Determination ---
-    addResult('Tiers', 'Good Standing', 'Good Standing', determineTier(125).name, determineTier(125).name === 'Good Standing');
-    addResult('Tiers', 'Coaching', 'Coaching', determineTier(124).name, determineTier(124).name === 'Coaching'); // 124 is < 125 but >= 85
-    addResult('Tiers', 'Severe', 'Severe', determineTier(50).name, determineTier(50).name === 'Severe');
-    addResult('Tiers', 'Final', 'Final', determineTier(1).name, determineTier(1).name === 'Final');
-    addResult('Tiers', 'Termination', 'Termination Review', determineTier(0).name, determineTier(0).name === 'Termination Review');
-
-    // --- Monthly Bonus ---
-    // Perfect Attendance (No callouts, no tardies) -> 10 + 5 = 15
-    const test8Violations = [];
-    const test8Actual = calculateMonthlyBonus(test8Violations, 20); // 20 shifts
-    addResult('Monthly Bonus', 'Perfect Attendance', 15, test8Actual, test8Actual === 15, '10 (Perfect) + 5 (No Tardy) = 15');
-
-    // No Tardiness (Has callout, no tardies) -> 5
-    const test9Violations = [{ type: VIOLATION_TYPES.CALLOUT, date: '2025-01-01' }];
-    const test9Actual = calculateMonthlyBonus(test9Violations, 20);
-    addResult('Monthly Bonus', 'No Tardiness Only', 5, test9Actual, test9Actual === 5, 'Has Callout, but No Tardies');
-
-    // No Bonus (Has tardy)
-    const test10Violations = [{ type: VIOLATION_TYPES.TARDY_1_5, date: '2025-01-01' }];
-    const test10Actual = calculateMonthlyBonus(test10Violations, 20);
-    addResult('Monthly Bonus', 'No Bonus', 0, test10Actual, test10Actual === 0, 'Has Tardy');
-
-    // Not enough shifts (<15)
-    const test11Actual = calculateMonthlyBonus([], 10);
-    addResult('Monthly Bonus', 'Min Shifts Check', 0, test11Actual, test11Actual === 0, 'Less than 15 shifts');
-
-    // --- Next Quarter Start ---
-    // Lowest: 60 (Severe), Bonus: 10 -> Reset to 100 + 10 = 110
-    // const test12Actual = calculateNextQuarterStart(60, 10);
-    // addResult('Next Quarter', 'Severe Reset + Bonus', 110, test12Actual, test12Actual === 110, 'Severe base 100 + 10 bonus');
-
-    // Lowest: 130 (Good), Bonus: 0 -> Reset to 150
-    // const test13Actual = calculateNextQuarterStart(130, 0);
-    // addResult('Next Quarter', 'Good Standing Reset', 150, test13Actual, test13Actual === 150, 'Good base 150');
 
     // --- Generate PDF ---
     const doc = new jsPDF();
@@ -134,7 +137,7 @@ export const runTestsAndDownloadReport = () => {
     // Title
     doc.setFontSize(20);
     doc.setTextColor(40, 40, 40);
-    doc.text('Application Logic Test Report', pageWidth / 2, 20, { align: 'center' });
+    doc.text('Application Logic Test Report (Rolling)', pageWidth / 2, 20, { align: 'center' });
 
     doc.setFontSize(10);
     doc.text(`Generated: ${new Date().toLocaleString()}`, pageWidth / 2, 30, { align: 'center' });
@@ -152,27 +155,9 @@ export const runTestsAndDownloadReport = () => {
     doc.setTextColor(255, 0, 0);
     doc.text(`Failed: ${failedCount}`, 80, 53);
 
-    // Configuration Table
-    autoTable(doc, {
-        startY: 70,
-        head: [['Configuration Key', 'Value']],
-        body: [
-            ['Starting Points', STARTING_POINTS],
-            ['Good Standing Min', TIERS.GOOD.min],
-            ['Coaching Min', TIERS.COACHING.min],
-            ['Severe Min', TIERS.SEVERE.min],
-            ['Final Min', TIERS.FINAL.min],
-            ['Max Bonus (Monthly)', '15'],
-            ['Max Bonus (Quarterly Start)', '15']
-        ],
-        theme: 'grid',
-        headStyles: { fillColor: [66, 66, 66] },
-        styles: { fontSize: 10 }
-    });
-
     // Results Table
     autoTable(doc, {
-        startY: doc.lastAutoTable.finalY + 15,
+        startY: 70,
         head: [['Category', 'Test Name', 'Expected', 'Actual', 'Status', 'Details']],
         body: results.map(r => [
             r.category,
@@ -203,16 +188,16 @@ export const runTestsAndDownloadReport = () => {
     const finalY = doc.lastAutoTable.finalY + 15;
     doc.setFontSize(14);
     doc.setTextColor(0);
-    doc.text('Logic Overview', 14, finalY);
+    doc.text('Rolling Logic Overview', 14, finalY);
     doc.setFontSize(10);
     doc.setTextColor(80);
     const logicText = [
-        '1. Deductions are progressive within a calendar month for tardies.',
-        '2. Callouts are progressive across the entire quarter.',
-        '3. Positive adjustments (Early Arrival +1, Shift Pickup +5) increase points.',
-        '4. Points are capped at 150 (Good Standing).',
-        '5. Monthly bonuses are awarded for Perfect Attendance (+10) and No Tardiness (+5).',
-        '6. Quarterly resets are based on the lowest tier reached, plus up to 15 bonus points.'
+        '1. Score is calculated by replaying history over a 90-day rolling window.',
+        '2. Callout Surge: 2+ callouts in 14 days trigger higher deduction.',
+        '3. Tier Drop: Dropping a tier resets score to that tier\'s ceiling.',
+        '4. Tier Climb: Holding a tier for 90 days boosts to higher tier.',
+        '5. Points capped at 150.',
+        '6. Positive adjustments can help recover score.'
     ];
     doc.text(logicText, 14, finalY + 10);
 

@@ -26,7 +26,7 @@ class ErrorBoundary extends React.Component {
                     for (const db of dbs) {
                         try {
                             window.indexedDB.deleteDatabase(db.name);
-                            console.log(`Deleted IndexedDB: ${db.name}`);
+                            // console.log(`Deleted IndexedDB: ${db.name}`);
                         } catch (e) {
                             console.warn(`Failed to delete ${db.name}`, e);
                         }

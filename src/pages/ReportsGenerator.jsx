@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useData } from '../contexts/DataContext';
-import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, STARTING_POINTS, TIERS, VIOLATION_TYPES, groupConsecutiveCallouts, parseDate } from '../utils/pointCalculator';
+import { calculateEmployeeState, determineTier, TIERS, VIOLATION_TYPES, groupConsecutiveCallouts, parseDate } from '../utils/pointCalculator';
 import { getQuarterKey } from '../utils/dateUtils';
 import {
     FileText, Printer, ChevronRight, Download, FileSpreadsheet, BarChart2, Search,
@@ -11,31 +11,24 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import EMDReportModal from '../components/EMDReportModal';
+
 import HealthCheckModal from '../components/HealthCheckModal';
+import FiveTierReportModal from '../components/FiveTierReportModal';
 
 // Force update timestamp: 2025-11-25 23:05
-
 const reports = [
     { id: 1, title: 'Daily Violation Log', category: 'Operational', desc: 'Violations from the last 24 hours', icon: Clock },
-    { id: 2, title: 'Late but Safe Report', category: 'Operational', desc: 'Tardies within the 5-minute grace period', icon: UserCheck },
     { id: 3, title: 'Monthly Callout Counter', category: 'Operational', desc: 'Employees with frequent callouts', icon: Calendar },
-    { id: 4, title: 'Monthly Bonus Potential', category: 'Operational', desc: 'Employees eligible for perfect attendance bonus', icon: TrendingUp },
     { id: 5, title: 'Shift-Based Trend Analysis', category: 'Operational', desc: 'Violation trends by shift (AM/PM)', icon: BarChart2 },
-    { id: 6, title: 'DA Trigger Report', category: 'Compliance', desc: 'Employees requiring disciplinary action', icon: ShieldAlert },
-    { id: 7, title: 'Near-Threshold Warning', category: 'Compliance', desc: 'Employees close to dropping a tier', icon: AlertTriangle },
-    { id: 8, title: 'High-Cost Infraction Summary', category: 'Compliance', desc: 'Violations with 20+ point deductions', icon: AlertTriangle },
     { id: 9, title: 'Tardiness Tier Progression', category: 'Compliance', desc: 'Employees with escalating tardiness', icon: TrendingUp },
-    { id: 10, title: 'Quarterly Point Audit', category: 'Compliance', desc: 'Audit of employee point balances', icon: FileText },
     { id: 11, title: 'Individual Attendance History', category: 'Individual', desc: 'Complete violation history for an employee', icon: History },
-    { id: 12, title: 'Recovery Trend Report', category: 'Individual', desc: 'Points recovered over time', icon: Activity },
     { id: 13, title: 'Monthly Employee Summary', category: 'Individual', desc: 'Summary of activity for the last 30 days', icon: UserCheck },
-    { id: 14, title: 'Disciplinary Status Report', category: 'Individual', desc: 'Current standing of all employees', icon: ShieldAlert },
     { id: 15, title: 'Tardy Breakdown', category: 'Analysis', desc: 'Breakdown of tardiness types', icon: PieChart },
     { id: 16, title: 'Team Bonus Eligibility', category: 'Analysis', desc: 'Percentage of team eligible for bonuses', icon: Users },
     { id: 17, title: 'QoQ Violation Comparison', category: 'Analysis', desc: 'Quarter over Quarter comparison', icon: BarChart2 },
-    { id: 19, title: 'DA Distribution Analytics', category: 'Analysis', desc: 'Distribution of employees across tiers', icon: PieChart },
     { id: 20, title: 'Positive Adjustments Report', category: 'Analysis', desc: 'Track early arrivals and shift pickups', icon: TrendingUp },
-    { id: 21, title: 'Starting Points', category: 'Individual', desc: 'Employee starting points and DA threshold per quarter', icon: TrendingUp }
+    { id: 21, title: 'Tier Progression', category: 'Individual', desc: 'Employee tier drops and climbs per quarter', icon: TrendingUp },
+    { id: 22, title: 'Sticky DA Report', category: 'Compliance', desc: 'Employees currently on probation with activation/reset dates', icon: ShieldAlert }
 ];
 const ReportsGenerator = () => {
     const { data, loading, logReportUsage } = useData();
@@ -61,10 +54,16 @@ const ReportsGenerator = () => {
     const [selectedQuarter, setSelectedQuarter] = useState('Q4'); // Changed from 'All' to 'Q4'
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [startDate, setStartDate] = useState(new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0]);
+    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
     const [qoqQ1, setQoqQ1] = useState('Q3');
     const [qoqQ2, setQoqQ2] = useState('Q4');
+    const [q1Year, setQ1Year] = useState(new Date().getFullYear());
+    const [q2Year, setQ2Year] = useState(new Date().getFullYear());
     const [isEMDModalOpen, setIsEMDModalOpen] = useState(false);
+
     const [isHealthCheckModalOpen, setIsHealthCheckModalOpen] = useState(false);
+    const [isFiveTierModalOpen, setIsFiveTierModalOpen] = useState(false);
 
     // Usage Tracking
     React.useEffect(() => {
@@ -168,19 +167,30 @@ const ReportsGenerator = () => {
                 const issuedDAs = data?.issuedDAs || [];
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
-                    const qKey = getQuarterKey();
-                    const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
-                    const points = calculateCurrentPoints(startPoints, empViolations, penalties);
-                    const tier = determineTier(points, data.settings.daSettings);
+                    const state = calculateEmployeeState(emp, empViolations, data.settings);
+                    const points = state.score;
+                    const tier = state.tier;
 
-                    if (tier.name !== 'Good Standing') {
-                        // Find date they crossed threshold (simplified: date of last violation that put them there)
-                        // In reality, we'd need to replay history. For now, use last violation date.
+                    if (tier.name !== TIERS.GOOD.name) {
+                        // Find date they crossed threshold using historyLog
+                        // Look for the most recent 'drop' event to this tier or worse?
+                        // Or just the most recent 'drop' event?
+                        const dropEvent = [...state.historyLog].reverse().find(e => e.type === 'drop' && e.tier === tier.name);
+
+                        // Fallback to last violation date if no drop event found (e.g. initial state)
                         const lastViolation = empViolations.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-                        const dateCrossed = lastViolation ? lastViolation.date : 'N/A';
+                        const dateCrossed = dropEvent ? dropEvent.date.toISOString().split('T')[0] : (lastViolation ? lastViolation.date : 'N/A');
 
-                        const daKey = `${emp.id}-${tier.name}`;
-                        const isIssued = issuedDAs.includes(daKey);
+                        const daKey = `${emp.id}-${tier.name}-${dateCrossed}`; // New Key format
+                        // Also check legacy key format for backward compatibility in display
+                        // Legacy: ID-Tier
+                        const legacyKey = `${emp.id}-${tier.name}`;
+
+                        // Check if issued
+                        // In daService we use specific keys. Here we just want to know if *A* DA was issued for this state.
+                        // If we have a drop event, we check that specific key.
+                        // If not, we might check legacy.
+                        const isIssued = issuedDAs.includes(daKey) || issuedDAs.includes(legacyKey) || issuedDAs.some(k => k.startsWith(`${emp.id}-${tier.name}`));
 
                         return {
                             'Employee': emp.name,
@@ -196,16 +206,15 @@ const ReportsGenerator = () => {
             case 7: // Near-Threshold Warning
                 return employees.map(emp => {
                     const empViolations = violations.filter(v => v.employeeId === emp.id);
-                    const qKey = getQuarterKey();
-                    const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
-                    const points = calculateCurrentPoints(startPoints, empViolations, penalties);
-                    const tier = determineTier(points, data.settings.daSettings);
+                    const state = calculateEmployeeState(emp, empViolations, data.settings);
+                    const points = state.score;
+                    const tier = state.tier;
+
                     // "Within 17 points of the next tier" - implies dropping to a lower tier
                     // Check distance to current tier's floor
                     const distanceToDrop = points - tier.min;
 
-                    if (distanceToDrop <= 17 && tier.name !== 'Termination Review') {
-                        const nextTierName = Object.values(TIERS).find(t => t.maxBonus === tier.min - 1)?.name || 'Lower Tier';
+                    if (distanceToDrop <= 17 && tier.name !== TIERS.TERMINATION.name) {
                         return { 'Employee': emp.name, 'Points': points, 'Risk': `Within ${distanceToDrop} pts of drop` };
                     }
                     return null;
@@ -223,29 +232,26 @@ const ReportsGenerator = () => {
                     if (lates.length > 3) return { 'Employee': emp.name, 'Tardies': lates.length, 'Trend': 'Escalating' };
                     return null;
                 }).filter(Boolean);
-            case 10: { // Quarterly Audit
-                const getQuarterEnd = (q) => {
+            case 10: { // Quarterly Audit (Historical Point Audit)
+                const getQuarterEnd = (q, year) => {
                     const qMap = { 'Q1': 2, 'Q2': 5, 'Q3': 8, 'Q4': 11 };
                     const month = qMap[q];
-                    return new Date(now.getFullYear(), month, 31);
+                    return new Date(year, month + 1, 0, 23, 59, 59); // Last day of month
                 };
 
-                const qMap = { 'Q1': [0, 1, 2], 'Q2': [3, 4, 5], 'Q3': [6, 7, 8], 'Q4': [9, 10, 11] };
-                const quarterMonths = qMap[selectedQuarter] || [];
-
                 return employees.map(e => {
-                    const quarterViolations = violations.filter(v => v.employeeId === e.id && quarterMonths.includes(parseInt(v.date.split('-')[1]) - 1));
-                    const qKey = `${now.getFullYear()}-${selectedQuarter}`;
-                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === e.id), data.settings);
-                    const quarterPoints = calculateCurrentPoints(startPoints, quarterViolations, penalties);
+                    const year = now.getFullYear();
+                    const quarterEnd = getQuarterEnd(selectedQuarter, year);
+
+                    const state = calculateEmployeeState(e, violations.filter(v => v.employeeId === e.id && new Date(v.date) <= quarterEnd), data.settings, quarterEnd);
+                    const quarterPoints = state.score;
 
                     const prevQ = selectedQuarter === 'Q1' ? 'Q4' : `Q${parseInt(selectedQuarter[1]) - 1}`;
                     const prevYear = selectedQuarter === 'Q1' ? now.getFullYear() - 1 : now.getFullYear();
-                    const prevQKey = `${prevYear}-${prevQ}`;
-                    const prevMonths = qMap[prevQ] || [];
-                    const prevViolations = violations.filter(v => v.employeeId === e.id && prevMonths.includes(parseInt(v.date.split('-')[1]) - 1));
-                    const prevStartPoints = calculateQuarterlyStart(prevQKey, violations.filter(v => v.employeeId === e.id), data.settings);
-                    const prevPoints = calculateCurrentPoints(prevStartPoints, prevViolations, penalties);
+                    const prevQuarterEnd = getQuarterEnd(prevQ, prevYear);
+
+                    const prevState = calculateEmployeeState(e, violations.filter(v => v.employeeId === e.id && new Date(v.date) <= prevQuarterEnd), data.settings, prevQuarterEnd);
+                    const prevPoints = prevState.score;
 
                     return {
                         'Employee': e.name,
@@ -259,22 +265,13 @@ const ReportsGenerator = () => {
             // --- INDIVIDUAL ---
             case 11: { // Individual History
                 const empId = selectedEmployeeId || employees[0]?.id;
+                let empViolations = violations.filter(v =>
+                    v.employeeId === empId &&
+                    v.date >= startDate &&
+                    v.date <= endDate
+                );
 
-                // 1. Get ALL violations for this employee to ensure correct progressive penalty counts
-                let empViolations = violations.filter(v => v.employeeId === empId);
-
-                // 2. Sort by date
                 empViolations.sort((a, b) => parseDate(a.date) - parseDate(b.date));
-
-                // 3. Group consecutive callouts (this handles the "consecutive days = 1 occurrence" rule)
-                // Note: groupConsecutiveCallouts returns a filtered list where subsequent consecutive callouts are removed.
-                // However, for the report, we might want to SHOW them but with 0 points?
-                // The current groupConsecutiveCallouts REMOVES them. 
-                // To show them as "0 points (Consecutive)", we need a slightly different approach or we just accept they are hidden/merged.
-                // The user said "Complete violation history". Hiding them might be confusing if they exist in the log.
-                // Let's stick to the standard calculation logic first: Calculate points for everything.
-
-                // Better approach: Iterate and calculate statefully.
 
                 const calloutPenalties = penalties?.callout || [15, 20, 25, 30, 35, 40];
                 const tardyPenalties = penalties?.tardy || {
@@ -284,26 +281,23 @@ const ReportsGenerator = () => {
                     [VIOLATION_TYPES.TARDY_30_PLUS]: [25, 35, 50, 50]
                 };
 
-                let calloutCount = 0;
-                const tardyCountsByMonth = {};
-
-                // We need to identify consecutive callouts to mark them as 0 points.
-                // Let's use a helper map to store calculated points for each violation ID.
+                // Helper to calculate points contextually
+                // We reuse the logic but bounded by the selected range?
+                // Actually, progressive penalties depend on history.
+                // We should calculate ALL history then filter?
+                // Yes: Calculate ALL, then filter output.
+                const allEmpViolations = violations.filter(v => v.employeeId === empId).sort((a, b) => parseDate(a.date) - parseDate(b.date));
                 const calculatedPointsMap = {};
                 const consecutiveCalloutIds = new Set();
-
-                // We need to process them in order to count correctly.
-                // But we also need to handle the "consecutive" logic which looks backwards.
-
+                let calloutCount = 0;
+                const tardyCountsByMonth = {};
                 let currentQuarterKey = null;
 
-                for (let i = 0; i < empViolations.length; i++) {
-                    const v = empViolations[i];
-
-                    // Determine Quarter for this violation
+                for (let i = 0; i < allEmpViolations.length; i++) {
+                    const v = allEmpViolations[i];
                     const vDate = parseDate(v.date);
                     const vYear = vDate.getFullYear();
-                    const vMonth = vDate.getMonth(); // 0-11
+                    const vMonth = vDate.getMonth();
                     const vQ = Math.floor(vMonth / 3) + 1;
                     const vQuarterKey = `${vYear}-Q${vQ}`;
 
@@ -313,11 +307,10 @@ const ReportsGenerator = () => {
                         currentQuarterKey = vQuarterKey;
                     }
 
-                    // Normalize type
                     const type = v.type === 'Callout' ? VIOLATION_TYPES.CALLOUT : v.type;
 
                     if (v.shiftCovered) {
-                        calculatedPointsMap[v._id] = 0; // Covered = 0 points
+                        calculatedPointsMap[v._id] = 0;
                         continue;
                     }
 
@@ -325,21 +318,16 @@ const ReportsGenerator = () => {
                         // Check for consecutive
                         let isConsecutive = false;
                         for (let j = i - 1; j >= 0; j--) {
-                            const prev = empViolations[j];
+                            const prev = allEmpViolations[j];
                             const prevType = prev.type === 'Callout' ? VIOLATION_TYPES.CALLOUT : prev.type;
-
                             if (prevType === VIOLATION_TYPES.CALLOUT && !prev.shiftCovered) {
                                 const d1 = parseDate(v.date);
                                 const d2 = parseDate(prev.date);
-                                // Normalize to midnight
                                 const date1 = new Date(d1.getFullYear(), d1.getMonth(), d1.getDate());
                                 const date2 = new Date(d2.getFullYear(), d2.getMonth(), d2.getDate());
                                 const diffDays = Math.ceil(Math.abs(date1 - date2) / (1000 * 60 * 60 * 24));
-
-                                if (diffDays === 1) {
-                                    isConsecutive = true;
-                                }
-                                break; // Found nearest previous
+                                if (diffDays === 1) isConsecutive = true;
+                                break;
                             }
                         }
 
@@ -351,72 +339,93 @@ const ReportsGenerator = () => {
                             calculatedPointsMap[v._id] = penalty;
                             calloutCount++;
                         }
-
                     } else if (tardyPenalties[type]) {
                         const date = parseDate(v.date);
                         const quarter = Math.floor(date.getMonth() / 3) + 1;
                         const quarterKey = `${date.getFullYear()}-Q${quarter}`;
-
                         if (!tardyCountsByMonth[quarterKey]) tardyCountsByMonth[quarterKey] = {};
                         if (!tardyCountsByMonth[quarterKey][type]) tardyCountsByMonth[quarterKey][type] = 0;
 
                         const count = tardyCountsByMonth[quarterKey][type];
                         const penaltyList = tardyPenalties[type];
                         const penalty = penaltyList[Math.min(count, penaltyList.length - 1)];
-
                         calculatedPointsMap[v._id] = penalty;
                         tardyCountsByMonth[quarterKey][type]++;
                     } else {
-                        // Fallback for other types or unknown types
                         calculatedPointsMap[v._id] = v.pointsDeducted || 0;
                     }
                 }
 
-                // 4. Apply Filters (Quarter/Month)
-                let filteredViolations = empViolations;
-                if (selectedQuarter !== 'All') {
-                    const qMap = { 'Q1': [0, 1, 2], 'Q2': [3, 4, 5], 'Q3': [6, 7, 8], 'Q4': [9, 10, 11] };
-                    const months = qMap[selectedQuarter];
-                    filteredViolations = filteredViolations.filter(v => months.includes(parseInt(v.date.split('-')[1]) - 1));
-                }
+                // Filter for display
+                return allEmpViolations
+                    .filter(v => v.date >= startDate && v.date <= endDate)
+                    .map(v => {
+                        const points = calculatedPointsMap[v._id] !== undefined ? calculatedPointsMap[v._id] : v.pointsDeducted;
+                        let pointsDisplay = -points;
+                        if (v.shiftCovered) pointsDisplay = '0 (Covered)';
+                        else if (consecutiveCalloutIds.has(v._id)) pointsDisplay = '0 (Consecutive)';
 
-                // 5. Map to Report Format
-                return filteredViolations.map(v => {
-                    const points = calculatedPointsMap[v._id] !== undefined ? calculatedPointsMap[v._id] : v.pointsDeducted;
-                    let pointsDisplay = -points;
-
-                    if (v.shiftCovered) {
-                        pointsDisplay = '0 (Covered)';
-                    } else if (consecutiveCalloutIds.has(v._id)) {
-                        pointsDisplay = '0 (Consecutive)';
-                    }
-
-                    return {
-                        'Date': v.date,
-                        'Type': v.type + (v.shiftCovered ? ' (Covered)' : ''),
-                        'Shift': v.shift || 'AM',
-                        'Points': pointsDisplay
-                    };
-                });
+                        return {
+                            'Date': v.date,
+                            'Type': v.type + (v.shiftCovered ? ' (Covered)' : ''),
+                            'Shift': v.shift || 'AM',
+                            'Points': pointsDisplay
+                        };
+                    });
             }
             case 12: // Recovery Trend
                 return employees.map(e => ({ 'Employee': e.name, 'Points Recovered (30d)': 0, 'Note': 'Recovery logic not yet active' }));
-            case 13: // Monthly Summary
-                return employees.map(e => {
-                    const count = violations.filter(v => v.employeeId === e.id && new Date(v.date) >= thirtyDaysAgo).length;
-                    return { 'Employee': e.name, 'Violations (30d)': count, 'Status': count === 0 ? 'Clean' : 'Active' };
-                });
-            case 14: { // Disciplinary Status
-                const qMap = { 'Q1': [0, 1, 2], 'Q2': [3, 4, 5], 'Q3': [6, 7, 8], 'Q4': [9, 10, 11] };
-                const quarterMonths = qMap[selectedQuarter] || [];
+            case 13: { // Monthly Employee Summary
+                const empId = selectedEmployeeId || employees[0]?.id;
+                const targetMonth = parseInt(selectedMonth);
 
-                return employees.map(emp => {
-                    const quarterViolations = violations.filter(v => v.employeeId === emp.id && quarterMonths.includes(parseInt(v.date.split('-')[1]) - 1));
-                    const qKey = `${new Date().getFullYear()}-${selectedQuarter}`;
-                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === emp.id), data.settings);
-                    const points = calculateCurrentPoints(startPoints, quarterViolations, penalties);
-                    return { 'Employee': emp.name, 'Quarter': selectedQuarter, 'Status': determineTier(points, data.settings.daSettings).name };
+                // Get Year? Assuming current year or finding violations for ALL years matching month? 
+                // Context suggests "specific month", implying a specific period. 
+                // Standard default is Current Year if not specified.
+                // But let's check violations in the last 365 days? 
+                // Or just filter by month index and assume current year if not specified.
+                // Let's default to Current Year.
+                const currentYear = new Date().getFullYear();
+
+                const targetViolations = violations.filter(v =>
+                    v.employeeId === empId &&
+                    (parseInt(v.date.split('-')[1]) - 1) === targetMonth &&
+                    v.date.startsWith(currentYear.toString())
+                );
+
+                // Group by Type
+                const grouped = {};
+                const details = [];
+
+                targetViolations.forEach(v => {
+                    if (!grouped[v.type]) grouped[v.type] = { count: 0, points: 0 };
+                    grouped[v.type].count++;
+                    grouped[v.type].points += (v.pointsDeducted || 0);
+
+                    // For details
+                    details.push({
+                        'Type': v.type,
+                        'Date': v.date,
+                        'Points Lost': v.pointsDeducted,
+                        'Category': 'Detail'
+                    });
                 });
+
+                // Create Summary Rows
+                const summaryRows = Object.entries(grouped).map(([type, data]) => ({
+                    'Type': `${type} (Summary)`,
+                    'Date': '---',
+                    'Points Lost': data.points,
+                    'Category': `Total: ${data.count}`
+                }));
+
+                // Combine: Summaries first, then Details (sorted by Date)
+                details.sort((a, b) => a.Date.localeCompare(b.Date));
+
+                // If no violations
+                if (summaryRows.length === 0) return [{ 'Type': 'No Violations', 'Date': '-', 'Points Lost': 0, 'Category': '-' }];
+
+                return [...summaryRows, ...details];
             }
             case 15: { // Tardy Breakdown
                 const tardyTypes = {};
@@ -435,9 +444,28 @@ const ReportsGenerator = () => {
             }
 
             // --- ANALYSIS ---
-            case 16: { // Team Bonus
-                const eligibleCount = employees.filter(e => !violations.some(v => v.employeeId === e.id && new Date(v.date) >= quarterStart)).length;
-                return [{ 'Metric': 'Eligible Employees', 'Value': eligibleCount }, { 'Metric': 'Total Employees', 'Value': employees.length }, { 'Metric': 'Percent', 'Value': `${((eligibleCount / employees.length) * 100).toFixed(1)}%` }];
+            case 16: { // Team Bonus Eligibility
+                // Bronze or above (Level 3+)
+                const eligibleEmployees = employees.filter(emp => {
+                    const state = calculateEmployeeState(emp, violations.filter(v => v.employeeId === emp.id), data.settings);
+                    return state.tier.level >= 3; // Good(5), Edu(4), Coach(3)
+                });
+
+                const eligibleCount = eligibleEmployees.length;
+                const total = employees.length;
+                const percentage = ((eligibleCount / total) * 100).toFixed(1);
+
+                // Return list of eligible employees + summary row?
+                // User report usually expects list of employees.
+                const rows = eligibleEmployees.map(e => ({
+                    'Employee': e.name,
+                    'Status': 'Eligible',
+                    'Current Tier': calculateEmployeeState(e, violations.filter(v => v.employeeId === e.id), data.settings).tier.name
+                }));
+
+                // Insert summary at top? Or just return list.
+                // "This report should every employee who is the bronze tier or above"
+                return rows;
             }
             case 17: { // QoQ Violation Comparison
                 const getQuarterMonths = (q) => {
@@ -445,35 +473,41 @@ const ReportsGenerator = () => {
                     return map[q] || [];
                 };
 
-                const getDataForQuarter = (q) => {
+                const getDataForQuarter = (year, q) => {
                     const months = getQuarterMonths(q);
-                    const qViolations = violations.filter(v => months.includes(parseInt(v.date.split('-')[1]) - 1));
+                    const qViolations = violations.filter(v =>
+                        months.includes(parseInt(v.date.split('-')[1]) - 1) &&
+                        v.date.startsWith(year.toString())
+                    );
 
                     const counts = {
                         [VIOLATION_TYPES.TARDY_1_5]: 0,
                         [VIOLATION_TYPES.TARDY_6_11]: 0,
                         [VIOLATION_TYPES.TARDY_12_29]: 0,
                         [VIOLATION_TYPES.TARDY_30_PLUS]: 0,
-                        [VIOLATION_TYPES.CALLOUT]: 0
+                        [VIOLATION_TYPES.CALLOUT]: 0,
+                        [VIOLATION_TYPES.EARLY_ARRIVAL]: 0,
+                        [VIOLATION_TYPES.SHIFT_PICKUP]: 0
                     };
 
                     qViolations.forEach(v => {
                         if (counts[v.type] !== undefined) {
                             counts[v.type]++;
-                        } else {
-                            // Group others if needed, or just ignore
                         }
                     });
                     return counts;
                 };
 
-                const data1 = getDataForQuarter(qoqQ1);
-                const data2 = getDataForQuarter(qoqQ2);
+                const label1 = `${q1Year} ${qoqQ1}`;
+                const label2 = `${q2Year} ${qoqQ2}`;
+
+                const data1 = getDataForQuarter(q1Year, qoqQ1);
+                const data2 = getDataForQuarter(q2Year, qoqQ2);
 
                 const comparison = Object.keys(data1).map(type => ({
                     name: type,
-                    [qoqQ1]: data1[type],
-                    [qoqQ2]: data2[type]
+                    [label1]: data1[type],
+                    [label2]: data2[type]
                 }));
 
                 return comparison;
@@ -481,11 +515,9 @@ const ReportsGenerator = () => {
             case 19: { // DA Distribution
                 const distribution = { 'Good Standing': 0, 'Coaching': 0, 'Severe': 0, 'Final': 0, 'Termination': 0 };
                 employees.forEach(emp => {
-                    const qKey = getQuarterKey();
-                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === emp.id), data.settings);
-                    const points = calculateCurrentPoints(startPoints, violations.filter(v => v.employeeId === emp.id), penalties);
-                    const tier = determineTier(points, data.settings.daSettings);
-                    if (distribution[tier.name] !== undefined) distribution[tier.name]++;
+                    // Current Status
+                    const state = calculateEmployeeState(emp, violations.filter(v => v.employeeId === emp.id), data.settings);
+                    if (distribution[state.tier.name] !== undefined) distribution[state.tier.name]++;
                 });
                 return Object.entries(distribution).map(([status, count]) => ({ 'Status': status, 'Count': count }));
             }
@@ -553,67 +585,81 @@ const ReportsGenerator = () => {
                 }));
             }
 
-            case 21: { // Starting Points
+            case 21: { // Tier Progression (formerly Starting Points)
                 const empId = selectedEmployeeId || employees[0]?.id;
                 const emp = employees.find(e => e.id === empId);
-                if (!emp) return [{ 'Message': 'Select an employee to view data.' }];
+                if (!emp) return [{ 'Message': 'Select an employee.' }];
 
-                const currentYear = new Date().getFullYear();
-                const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
-                const qMap = { 'Q1': [0, 1, 2], 'Q2': [3, 4, 5], 'Q3': [6, 7, 8], 'Q4': [9, 10, 11] };
+                const state = calculateEmployeeState(emp, violations.filter(v => v.employeeId === empId), data.settings);
+                // We want a list of all tier changes: Drop and Climb
 
-                return quarters.map(q => {
-                    const qKey = `${currentYear}-${q}`;
-                    const months = qMap[q];
+                const events = state.eventLog.filter(e =>
+                    e.type === 'demotion' ||
+                    e.type === 'promotion' ||
+                    e.type === 'promotion_points' ||
+                    e.type === 'reset'
+                );
 
-                    // Get violations for this quarter
-                    const qViolations = violations.filter(v =>
-                        v.employeeId === empId &&
-                        months.includes(parseInt(v.date.split('-')[1]) - 1) &&
-                        v.date.startsWith(currentYear.toString())
-                    );
+                return events.map(e => ({
+                    'Date': e.date.toISOString().split('T')[0],
+                    'Event': e.type === 'demotion' ? 'Dropped to Lower Tier' : 'Climbed/Reset',
+                    'Tier From': e.type === 'demotion' ? (e.details.match(/from (.*?) to/)?.[1] || '-') : (e.details.match(/from (.*?) to/)?.[1] || '-'),
+                    'Tier To': e.tier.name,
+                    'Points': e.points
+                }));
+            }
 
-                    // Calculate Starting Points
-                    const startPoints = calculateQuarterlyStart(qKey, violations.filter(v => v.employeeId === empId), data.settings);
+            case 22: { // Sticky DA Report
+                // Employees who activated DAs and when they reset (hit Tier 1 again)
+                const rows = [];
 
-                    // Calculate End Score
-                    const endPoints = calculateCurrentPoints(startPoints, qViolations, penalties);
+                employees.forEach(emp => {
+                    const state = calculateEmployeeState(emp, violations.filter(v => v.employeeId === emp.id), data.settings);
+                    // Traverse eventLog for demotions and subsequent resets
+                    // We want pairs: Drop -> Reset. 
+                    // Or just list all DA activations?
 
-                    // Determine DA Threshold (Tier) at end of quarter
-                    const tier = determineTier(endPoints, data.settings.daSettings);
+                    const events = state.eventLog.sort((a, b) => a.date - b.date);
+                    let activeDA = null;
 
-                    // Count Violations by Type
-                    const counts = {
-                        [VIOLATION_TYPES.CALLOUT]: 0,
-                        [VIOLATION_TYPES.TARDY_1_5]: 0,
-                        [VIOLATION_TYPES.TARDY_6_11]: 0,
-                        [VIOLATION_TYPES.TARDY_12_29]: 0,
-                        [VIOLATION_TYPES.TARDY_30_PLUS]: 0
-                    };
-
-                    let otherViolations = 0;
-
-                    qViolations.forEach(v => {
-                        if (counts[v.type] !== undefined) {
-                            counts[v.type]++;
-                        } else {
-                            otherViolations++;
+                    events.forEach(e => {
+                        if (e.type === 'demotion') {
+                            // Assuming any demotion below Educational (Level 4) or even Educational counts?
+                            // User said "activated da's". Levels < 5 (Good) are DAs.
+                            if (e.tier.level < 5) {
+                                activeDA = {
+                                    start: e.date,
+                                    tier: e.tier.name,
+                                    reset: null
+                                };
+                                // Push immediately, we'll update reset if we find it
+                                rows.push({
+                                    'Employee': emp.name,
+                                    'DA Level': e.tier.name,
+                                    'Activation Date': e.date.toISOString().split('T')[0],
+                                    'Reset Date': 'Active'
+                                });
+                            }
+                        } else if ((e.type === 'reset' || e.type === 'promotion') && activeDA) {
+                            const activeTierLevel = Object.values(TIERS).find(t => t.name === activeDA.tier)?.level || 0;
+                            if (e.tier.level > activeTierLevel) {
+                                // This is a climb
+                            }
+                            // Specifically "hit tier 1 again"
+                            if (e.tier.level === 5) {
+                                // Find the row we pushed and update it? 
+                                // Or just find the last "Active" row for this employee and tier?
+                                const lastRow = rows[rows.length - 1];
+                                if (lastRow && lastRow.Employee === emp.name && lastRow['Reset Date'] === 'Active') {
+                                    lastRow['Reset Date'] = e.date.toISOString().split('T')[0];
+                                    activeDA = null;
+                                }
+                            }
                         }
                     });
-
-                    return {
-                        'Quarter': q,
-                        'Starting Score': startPoints,
-                        'End Score': endPoints,
-                        'DA Threshold': tier.name,
-                        'Call Outs': counts[VIOLATION_TYPES.CALLOUT],
-                        'Tardy (1-5)': counts[VIOLATION_TYPES.TARDY_1_5],
-                        'Tardy (6-11)': counts[VIOLATION_TYPES.TARDY_6_11],
-                        'Tardy (12-29)': counts[VIOLATION_TYPES.TARDY_12_29],
-                        'Tardy (30+)': counts[VIOLATION_TYPES.TARDY_30_PLUS],
-                        'Other': otherViolations
-                    };
                 });
+
+                return rows.length > 0 ? rows : [{ 'Message': 'No DA history found.' }];
             }
 
             default:
@@ -628,14 +674,12 @@ const ReportsGenerator = () => {
     }, [selectedReport, selectedEmployeeId, selectedQuarter, selectedMonth, selectedDate, qoqQ1, qoqQ2, employees, violations, data?.settings?.violationPenalties, data?.settings?.companyName, data?.issuedDAs]);
 
     const handleExportPDF = async () => {
-        console.log('Export PDF button clicked');
 
         if (!selectedReport || reportData.length === 0) {
             alert('No report data to export');
             return;
         }
 
-        console.log('Generating PDF...');
         const doc = new jsPDF();
 
         // Header
@@ -687,11 +731,10 @@ const ReportsGenerator = () => {
             doc.text(`Page ${i} of ${pageCount}`, doc.internal.pageSize.width - 30, doc.internal.pageSize.height - 10);
         }
 
-        console.log('PDF generated successfully');
+
 
         // Check if we're in Electron
         if (window.electron && window.electron.savePdf) {
-            console.log('Using Electron save dialog...');
             try {
                 // Get PDF as base64 string
                 const pdfData = doc.output('datauristring').split(',')[1];
@@ -832,6 +875,35 @@ const ReportsGenerator = () => {
                         <FileSpreadsheet size={20} />
                         Generate EMD Report
                     </button>
+
+                    <button
+                        onClick={() => setIsFiveTierModalOpen(true)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.75rem',
+                            padding: '1rem 1.5rem',
+                            backgroundColor: 'var(--bg-secondary)',
+                            border: '1px solid var(--accent-warning)',
+                            borderRadius: 'var(--radius-lg)',
+                            color: 'var(--accent-warning)',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            boxShadow: 'var(--shadow-sm)',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--accent-warning)';
+                            e.currentTarget.style.color = 'white';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                            e.currentTarget.style.color = 'var(--accent-warning)';
+                        }}
+                    >
+                        <Activity size={20} />
+                        5-Tier Analysis
+                    </button>
                 </div>
 
                 {Object.entries(groupedReports).map(([category, categoryReports]) => (
@@ -968,7 +1040,7 @@ const ReportsGenerator = () => {
                                         </select>
                                     </div>
                                 )}
-                                {(selectedReport.id === 11 || selectedReport.id === 20) && (
+                                {(selectedReport.id === 20) && (
                                     <div className="no-print" style={{ marginTop: '1rem' }}>
                                         <label style={{ marginRight: '0.5rem', fontWeight: 500 }}>Select Quarter:</label>
                                         <select
@@ -984,7 +1056,29 @@ const ReportsGenerator = () => {
                                         </select>
                                     </div>
                                 )}
-                                {selectedReport.id === 15 && (
+                                {selectedReport.id === 11 && (
+                                    <div className="no-print" style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
+                                        <div>
+                                            <label style={{ marginRight: '0.5rem', fontWeight: 500 }}>Start Date:</label>
+                                            <div style={{ width: '200px' }}>
+                                                <ModernDatePicker
+                                                    value={startDate}
+                                                    onChange={setStartDate}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label style={{ marginRight: '0.5rem', fontWeight: 500 }}>End Date:</label>
+                                            <div style={{ width: '200px' }}>
+                                                <ModernDatePicker
+                                                    value={endDate}
+                                                    onChange={setEndDate}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                {(selectedReport.id === 15 || selectedReport.id === 13) && (
                                     <div className="no-print" style={{ marginTop: '1rem' }}>
                                         <label style={{ marginRight: '0.5rem', fontWeight: 500 }}>Select Month:</label>
                                         <select
@@ -1001,12 +1095,12 @@ const ReportsGenerator = () => {
                                 {selectedReport.id === 1 && (
                                     <div className="no-print" style={{ marginTop: '1rem' }}>
                                         <label style={{ marginRight: '0.5rem', fontWeight: 500 }}>Select Date:</label>
-                                        <input
-                                            type="date"
-                                            value={selectedDate}
-                                            onChange={e => setSelectedDate(e.target.value)}
-                                            style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
-                                        />
+                                        <div style={{ width: '200px' }}>
+                                            <ModernDatePicker
+                                                value={selectedDate}
+                                                onChange={setSelectedDate}
+                                            />
+                                        </div>
                                     </div>
                                 )}
                                 {(selectedReport.id === 3 || selectedReport.id === 5) && (
@@ -1036,6 +1130,50 @@ const ReportsGenerator = () => {
                                             <option value="Q3">Q3 (Jul-Sep)</option>
                                             <option value="Q4">Q4 (Oct-Dec)</option>
                                         </select>
+                                    </div>
+                                )}
+                                {selectedReport.id === 17 && (
+                                    <div className="no-print" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                            <label style={{ width: '80px', fontWeight: 500 }}>Period 1:</label>
+                                            <select
+                                                value={q1Year}
+                                                onChange={e => setQ1Year(parseInt(e.target.value))}
+                                                style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                                            >
+                                                {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+                                            </select>
+                                            <select
+                                                value={qoqQ1}
+                                                onChange={e => setQoqQ1(e.target.value)}
+                                                style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                                            >
+                                                <option value="Q1">Q1</option>
+                                                <option value="Q2">Q2</option>
+                                                <option value="Q3">Q3</option>
+                                                <option value="Q4">Q4</option>
+                                            </select>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                            <label style={{ width: '80px', fontWeight: 500 }}>Period 2:</label>
+                                            <select
+                                                value={q2Year}
+                                                onChange={e => setQ2Year(parseInt(e.target.value))}
+                                                style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                                            >
+                                                {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+                                            </select>
+                                            <select
+                                                value={qoqQ2}
+                                                onChange={e => setQoqQ2(e.target.value)}
+                                                style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--bg-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                                            >
+                                                <option value="Q1">Q1</option>
+                                                <option value="Q2">Q2</option>
+                                                <option value="Q3">Q3</option>
+                                                <option value="Q4">Q4</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 )}
 
@@ -1124,6 +1262,10 @@ const ReportsGenerator = () => {
             <HealthCheckModal
                 isOpen={isHealthCheckModalOpen}
                 onClose={() => setIsHealthCheckModalOpen(false)}
+            />
+            <FiveTierReportModal
+                isOpen={isFiveTierModalOpen}
+                onClose={() => setIsFiveTierModalOpen(false)}
             />
         </div >
     );

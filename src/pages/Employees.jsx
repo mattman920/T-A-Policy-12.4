@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../contexts/DataContext';
 import Modal from '../components/Modal';
-import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, STARTING_POINTS, calculateDeductions, VIOLATION_TYPES, parseDate } from '../utils/pointCalculator';
-import { getCurrentQuarterDates, getQuarterKey } from '../utils/dateUtils';
+import { determineTier, calculateViolationPenalty, VIOLATION_TYPES, parseDate } from '../utils/pointCalculator';
+import { getCurrentQuarterDates } from '../utils/dateUtils';
 import { Search, Upload, Archive, UserPlus, FileText, Filter, Trash2 } from 'lucide-react';
+import ModernDatePicker from '../components/ModernDatePicker';
 import Papa from 'papaparse';
 
 const Employees = () => {
@@ -39,20 +40,15 @@ const Employees = () => {
     const handleAddViolation = async (e) => {
         e.preventDefault();
         if (selectedEmployee) {
-            // Calculate marginal deduction
-            const { startDate, endDate } = getCurrentQuarterDates();
-            const empViolations = data.violations.filter(v => {
-                const vDate = new Date(v.date);
-                return v.employeeId === selectedEmployee.id && vDate >= startDate && vDate <= endDate;
-            });
-            const currentDeductions = calculateDeductions(empViolations, data.settings.violationPenalties);
+            // Calculate penalty using new logic
+            const allEmpViolations = data.violations.filter(v => v.employeeId === selectedEmployee.id);
+            const penalty = calculateViolationPenalty(
+                { type: violationType, date: violationDate },
+                allEmpViolations,
+                data.settings
+            );
 
-            const newViolation = { type: violationType, date: violationDate };
-            const newDeductions = calculateDeductions([...empViolations, newViolation], data.settings.violationPenalties);
-
-            const pointsDeducted = newDeductions - currentDeductions;
-
-            await addViolation(selectedEmployee.id, violationType, violationDate, pointsDeducted, violationShift);
+            await addViolation(selectedEmployee.id, violationType, violationDate, penalty, violationShift);
             setIsViolationModalOpen(false);
             setSelectedEmployee(null);
             setViolationShift('AM'); // Reset shift
@@ -144,16 +140,9 @@ const Employees = () => {
     const employeeCards = React.useMemo(() => {
         return filteredEmployees.map(employee => {
             try {
-                const { startDate, endDate } = getCurrentQuarterDates();
-                const empViolations = data.violations.filter(v => {
-                    const vDate = parseDate(v.date);
-                    return v.employeeId === employee.id && vDate >= startDate && vDate <= endDate;
-                });
-                const allEmpViolations = data.violations.filter(v => v.employeeId === employee.id);
-                const qKey = getQuarterKey();
-                const startPoints = calculateQuarterlyStart(qKey, allEmpViolations, data.settings);
-                const points = calculateCurrentPoints(startPoints, empViolations, data.settings.violationPenalties);
-                const tier = determineTier(points, data.settings.daSettings);
+                // Use pre-calculated state from DataContext (Rolling Stabilization)
+                const points = employee.currentPoints !== undefined ? employee.currentPoints : data.settings.startingPoints;
+                const tier = employee.currentTier || determineTier(points, data.settings.daSettings);
 
                 return (
                     <div key={employee.id} style={{
@@ -174,8 +163,8 @@ const Employees = () => {
                                 borderRadius: '9999px',
                                 fontSize: '0.75rem',
                                 fontWeight: 600,
-                                backgroundColor: tier.color + '20',
-                                color: tier.color
+                                backgroundColor: (tier.color || '#10B981') + '20',
+                                color: tier.color || '#10B981'
                             }}>
                                 {points} pts
                             </div>
@@ -184,7 +173,7 @@ const Employees = () => {
                         <div style={{ marginBottom: '1rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                                 <span style={{ color: 'var(--text-secondary)' }}>Status</span>
-                                <span style={{ fontWeight: 500, color: tier.color }}>{tier.name}</span>
+                                <span style={{ fontWeight: 500, color: tier.color || '#10B981' }}>{tier.name || 'Good Standing'}</span>
                             </div>
                         </div>
 
@@ -387,19 +376,11 @@ const Employees = () => {
                         />
                     </div>
                     <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Start Date</label>
-                        <input
-                            type="date"
+                        <ModernDatePicker
+                            label="Start Date"
                             value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
+                            onChange={setStartDate}
                             required
-                            style={{
-                                width: '100%',
-                                padding: '0.75rem',
-                                borderRadius: 'var(--radius-md)',
-                                border: '1px solid #cbd5e1',
-                                fontSize: '1rem'
-                            }}
                         />
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem' }}>
@@ -455,19 +436,11 @@ const Employees = () => {
                         />
                     </div>
                     <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Start Date</label>
-                        <input
-                            type="date"
+                        <ModernDatePicker
+                            label="Start Date"
                             value={editStartDate}
-                            onChange={(e) => setEditStartDate(e.target.value)}
+                            onChange={setEditStartDate}
                             required
-                            style={{
-                                width: '100%',
-                                padding: '0.75rem',
-                                borderRadius: 'var(--radius-md)',
-                                border: '1px solid #cbd5e1',
-                                fontSize: '1rem'
-                            }}
                         />
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem' }}>
@@ -525,22 +498,17 @@ const Employees = () => {
                             <option value="Tardy (12-29 min)">Tardy (12-29 min)</option>
                             <option value="Tardy (30+ min)">Tardy (30+ min)</option>
                             <option value={VIOLATION_TYPES.CALLOUT}>{VIOLATION_TYPES.CALLOUT}</option>
+                            <option value={VIOLATION_TYPES.EARLY_ARRIVAL}>{VIOLATION_TYPES.EARLY_ARRIVAL}</option>
+                            <option value={VIOLATION_TYPES.SHIFT_PICKUP}>{VIOLATION_TYPES.SHIFT_PICKUP}</option>
+                            <option value={VIOLATION_TYPES.NO_CALL_NO_SHOW}>{VIOLATION_TYPES.NO_CALL_NO_SHOW}</option>
                         </select>
                     </div>
                     <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Date</label>
-                        <input
-                            type="date"
+                        <ModernDatePicker
+                            label="Date"
                             value={violationDate}
-                            onChange={(e) => setViolationDate(e.target.value)}
+                            onChange={setViolationDate}
                             required
-                            style={{
-                                width: '100%',
-                                padding: '0.75rem',
-                                borderRadius: 'var(--radius-md)',
-                                border: '1px solid #cbd5e1',
-                                fontSize: '1rem'
-                            }}
                         />
                     </div>
                     <div>

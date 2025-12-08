@@ -1,4 +1,4 @@
-import { calculateCurrentPoints, VIOLATION_TYPES } from '../utils/pointCalculator';
+import { VIOLATION_TYPES } from '../utils/pointCalculator';
 
 export const HEALTH_STAGES = {
     GREEN: { min: 126, name: 'Good Standing', color: '#10B981', label: 'Green' }, // 126 - 150

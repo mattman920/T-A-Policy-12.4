@@ -15,7 +15,10 @@ console.error = (...args) => {
     // Check for the specific object structure or message
     if (typeof arg === 'object' && arg !== null && (
       arg.msg === 'block not in reader' ||
-      (arg.message && arg.message.includes('block not in reader'))
+      (arg.message && arg.message.includes('block not in reader')) ||
+      (arg.message && arg.message.includes('block not in compact reader')) ||
+      (arg.msg && arg.msg.includes('block not in compact reader')) ||
+      (arg.error && arg.error.includes('missing block'))
     )) {
       return;
     }

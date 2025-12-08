@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Modal from './Modal';
 import { useData } from '../contexts/DataContext';
-import { calculateCurrentPoints, determineTier, calculateQuarterlyStart, TIERS, parseDate } from '../utils/pointCalculator';
+import { calculateEmployeeState, determineTier, TIERS, parseDate } from '../utils/pointCalculator';
 import { getQuarterKey } from '../utils/dateUtils';
 import Papa from 'papaparse';
 import { jsPDF } from 'jspdf';
@@ -98,35 +98,20 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                 if (!employee) return null;
 
                 let currentPoints = 0;
-                let startPoints = 0;
+                let currentTier = TIERS.GOOD; // Default
 
                 if (employee) {
                     const empViolations = data.violations.filter(v => v.employeeId === employee.id);
                     // Calculate points based on violations up to the end of the selected month
                     const reportDate = new Date(selectedYear, selectedMonth + 1, 0); // End of selected month
-                    const qKey = getQuarterKey(reportDate);
+                    reportDate.setHours(23, 59, 59, 999);
 
-                    // Parse Quarter Start Date
-                    const [qYearStr, qStr] = qKey.split('-');
-                    const qYear = parseInt(qYearStr);
-                    const qQuarter = parseInt(qStr.replace('Q', ''));
-                    const quarterStartDate = new Date(qYear, (qQuarter - 1) * 3, 1);
-                    // Revert to Report Date as requested by user ("last day of report")
-                    // const quarterEndDate = new Date(qYear, qQuarter * 3, 0, 23, 59, 59, 999);
+                    // Filter violations up to report date
+                    const historyViolations = empViolations.filter(v => new Date(v.date) <= reportDate);
 
-
-
-                    // Filter violations to be within this quarter AND up to report date
-                    const relevantViolations = empViolations.filter(v => {
-                        const vDate = parseDate(v.date);
-                        const inRange = vDate >= quarterStartDate && vDate <= reportDate;
-                        return inRange;
-                    });
-
-
-
-                    startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
-                    currentPoints = calculateCurrentPoints(startPoints, relevantViolations, data.settings.violationPenalties);
+                    const state = calculateEmployeeState(employee, historyViolations, { ...data.settings, targetDate: reportDate });
+                    currentPoints = state.score;
+                    currentTier = state.tier;
                 }
 
                 const scheduledShifts = parseInt(row['Scheduled'] || '0', 10);
@@ -139,8 +124,8 @@ const EMDReportModal = ({ isOpen, onClose }) => {
                 const potentialEMD = scheduledShifts * 5;
 
                 // B. Deduction
-                // Use determineTier to get the tier effectively used in the Scorecard
-                const tier = determineTier(currentPoints, data.settings.daSettings);
+                // Use state.tier from calculation
+                const tier = currentTier;
 
 
 
@@ -161,9 +146,8 @@ const EMDReportModal = ({ isOpen, onClose }) => {
 
                 // C. Bonus (Reward Tiers)
                 let bonusPercent = 0;
-                if (currentPoints >= 145) bonusPercent = 0.20;      // Gold
-                else if (currentPoints >= 138) bonusPercent = 0.10; // Silver
-                else if (currentPoints >= 130) bonusPercent = 0.05; // Bronze
+                if (currentPoints >= 148) bonusPercent = 0.20;      // 120% Benefit
+                else if (currentPoints >= 146) bonusPercent = 0.10; // 110% Benefit
 
                 // D. Final EMD
                 const baseEMD = potentialEMD * (1 - deductionPercent);

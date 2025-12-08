@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { useData } from '../contexts/DataContext';
-import { calculateDeductions, calculateCurrentPoints, calculateQuarterlyStart, STARTING_POINTS, VIOLATION_TYPES } from '../utils/pointCalculator';
-import { getQuarterKey, getQuarterDates } from '../utils/dateUtils';
-import { AlertTriangle, CheckCircle, User, Calendar, Clock, Edit2, ArrowLeft, Save, X, Trash2, PlusCircle } from 'lucide-react';
+import { calculateUserState, calculateViolationPenalty, VIOLATION_TYPES, parseDate } from '../utils/pointCalculator';
+import { AlertTriangle, CheckCircle, User, Clock, Edit2, ArrowLeft, Save, X, Trash2, PlusCircle, Search, Filter, Calendar } from 'lucide-react';
+import ModernDatePicker from '../components/ModernDatePicker';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
 
 const LogViolation = () => {
-    const { data, addViolation, updateViolation, deleteViolation } = useData();
+    const { data, addViolation, updateViolation, deleteViolation, deleteViolations } = useData();
     const navigate = useNavigate();
 
     // Mode: 'log' or 'edit'
@@ -19,54 +19,64 @@ const LogViolation = () => {
     const [violationDate, setViolationDate] = useState(new Date().toISOString().split('T')[0]);
     const [violationShift, setViolationShift] = useState('AM');
     const [shiftCovered, setShiftCovered] = useState(false);
+
+    // Protected Absence State
+    const [isProtected, setIsProtected] = useState(false);
+    const [protectedReason, setProtectedReason] = useState('');
+    const [docConfirmed, setDocConfirmed] = useState(false);
+
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Edit Mode State
-    const [sortOption, setSortOption] = useState('month'); // 'month' or 'week'
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingViolation, setEditingViolation] = useState(null);
+
+    // Advanced Filters
+    const [filterEmployeeId, setFilterEmployeeId] = useState('');
+    const [filterStartDate, setFilterStartDate] = useState('');
+    const [filterEndDate, setFilterEndDate] = useState('');
 
     const employees = data?.employees || [];
     const violations = data?.violations || [];
 
     // --- Log Mode Logic ---
-    const getPointImpact = () => {
-        if (!selectedEmployeeId) return 0;
+    const calculateImpact = () => {
+        if (!selectedEmployeeId || !data?.settings) return { deduction: 0, newPoints: 0 };
 
-        const targetDate = violationDate ? new Date(violationDate) : new Date();
-        const qKey = getQuarterKey(targetDate);
-        const { startDate, endDate } = getQuarterDates(qKey);
+        // Immediate return for protected or covered
+        const tempViolation = {
+            id: 'temp',
+            employeeId: selectedEmployeeId,
+            type: violationType,
+            date: violationDate,
+            shiftCovered,
+            protectedAbsence: isProtected
+        };
 
         const empViolations = violations.filter(v => v.employeeId === selectedEmployeeId);
-        const qViolations = empViolations.filter(v => {
-            const d = new Date(v.date);
-            return d >= startDate && d <= endDate;
-        });
 
-        const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
-        const currentPoints = calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
+        // 1. Calculate Deduction Amount exactly as the system would
+        const deduction = calculateViolationPenalty(tempViolation, empViolations, data.settings);
 
-        const newViolation = { type: violationType, date: violationDate, shiftCovered };
-        const newPoints = calculateCurrentPoints(startPoints, [...qViolations, newViolation], data.settings.violationPenalties);
+        // 2. Calculate New Total Score
+        // We still run calculateUserState to get the final score which includes tier resets etc.
+        const newState = calculateUserState([...empViolations, tempViolation], data.settings);
 
-        return newPoints - currentPoints;
+        return {
+            deduction,
+            newPoints: newState.points
+        };
     };
+
+    const impactData = useMemo(() => calculateImpact(), [
+        selectedEmployeeId, violationDate, violationType, isProtected, shiftCovered, violations, data.settings
+    ]);
 
     const getCurrentPoints = () => {
         if (!selectedEmployeeId) return 0;
-
-        const targetDate = violationDate ? new Date(violationDate) : new Date();
-        const qKey = getQuarterKey(targetDate);
-        const { startDate, endDate } = getQuarterDates(qKey);
-
         const empViolations = violations.filter(v => v.employeeId === selectedEmployeeId);
-        const qViolations = empViolations.filter(v => {
-            const d = new Date(v.date);
-            return d >= startDate && d <= endDate;
-        });
-
-        const startPoints = calculateQuarterlyStart(qKey, empViolations, data.settings);
-        return calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
+        const state = calculateUserState(empViolations, data.settings);
+        return state.points;
     };
 
     const handleSubmit = async (e) => {
@@ -77,12 +87,30 @@ const LogViolation = () => {
             return;
         }
 
+        if (isProtected) {
+            if (!protectedReason) {
+                alert('Please select a reason for the protected absence.');
+                return;
+            }
+            if (!docConfirmed) {
+                alert('You must verify that documentation is on file.');
+                return;
+            }
+        }
+
+
         setIsSubmitting(true);
-        const impact = getPointImpact();
-        const pointsToLog = Math.abs(impact);
+        // Use the calculated deduction directly for accuracy
+        const pointsToLog = impactData.deduction;
 
         try {
-            await addViolation(selectedEmployeeId, violationType, violationDate, pointsToLog, violationShift, shiftCovered);
+            await addViolation(selectedEmployeeId, violationType, violationDate, pointsToLog, {
+                shift: violationShift,
+                shiftCovered,
+                protectedAbsence: isProtected,
+                protectedAbsenceReason: isProtected ? protectedReason : '',
+                documentationConfirmed: isProtected ? docConfirmed : false
+            });
 
             // Reset form
             setSelectedEmployeeId('');
@@ -90,6 +118,9 @@ const LogViolation = () => {
             setViolationDate(new Date().toISOString().split('T')[0]);
             setViolationShift('AM');
             setShiftCovered(false);
+            setIsProtected(false);
+            setProtectedReason('');
+            setDocConfirmed(false);
 
             alert('Violation logged successfully!');
         } catch (error) {
@@ -100,71 +131,25 @@ const LogViolation = () => {
     };
 
     const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
-
-    const pointImpact = useMemo(() => getPointImpact(), [selectedEmployeeId, violationDate, violationType, violationShift, shiftCovered, violations, data.settings]);
-    const currentPoints = useMemo(() => getCurrentPoints(), [selectedEmployeeId, violationDate, violations, data.settings]);
-    const newPoints = currentPoints + pointImpact;
+    const currentPoints = useMemo(() => getCurrentPoints(), [selectedEmployeeId, violations, data.settings]);
+    const newPoints = impactData.newPoints;
 
     // --- Edit Mode Logic ---
-    const [filterMode, setFilterMode] = useState('all'); // 'all', 'quarter', 'week'
-    const [filterValue, setFilterValue] = useState('');
-
-    // Helper Functions
-    const getQuarter = (dateStr) => {
-        const d = new Date(dateStr);
-        const month = d.getMonth();
-        const year = d.getFullYear();
-        const q = Math.floor(month / 3) + 1;
-        return `Q${q} ${year}`;
-    };
-
-    const getWeek = (dateStr) => {
-        const d = new Date(dateStr);
-        const day = d.getDay();
-        const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is sunday
-        const monday = new Date(d.setDate(diff));
-        return `Week of ${monday.toLocaleString('default', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-    };
-
-    // Derived Data for Dropdowns
-    const availableQuarters = useMemo(() => {
-        const quarters = new Set(violations.map(v => getQuarter(v.date)));
-        return Array.from(quarters).sort().reverse(); // Sort descending
-    }, [violations]);
-
-    const availableWeeks = useMemo(() => {
-        const weeks = new Set(violations.map(v => getWeek(v.date)));
-        // Sort by date logic (parsing string back to date for sort)
-        return Array.from(weeks).sort((a, b) => {
-            const dateA = new Date(a.replace('Week of ', ''));
-            const dateB = new Date(b.replace('Week of ', ''));
-            return dateB - dateA;
-        });
-    }, [violations]);
-
-    // Filtered & Sorted Violations
     const sortedViolations = useMemo(() => {
         let filtered = [...violations];
 
-        if (filterMode === 'quarter' && filterValue) {
-            filtered = filtered.filter(v => getQuarter(v.date) === filterValue);
-        } else if (filterMode === 'week' && filterValue) {
-            filtered = filtered.filter(v => getWeek(v.date) === filterValue);
+        if (filterEmployeeId) {
+            filtered = filtered.filter(v => v.employeeId === filterEmployeeId);
+        }
+        if (filterStartDate) {
+            filtered = filtered.filter(v => v.date >= filterStartDate);
+        }
+        if (filterEndDate) {
+            filtered = filtered.filter(v => v.date <= filterEndDate);
         }
 
         return filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
-    }, [violations, filterMode, filterValue]);
-
-    // Reset filter value when mode changes
-    const handleModeChange = (newMode) => {
-        setFilterMode(newMode);
-        setFilterValue('');
-        if (newMode === 'quarter' && availableQuarters.length > 0) {
-            setFilterValue(availableQuarters[0]);
-        } else if (newMode === 'week' && availableWeeks.length > 0) {
-            setFilterValue(availableWeeks[0]);
-        }
-    };
+    }, [violations, filterEmployeeId, filterStartDate, filterEndDate]);
 
     const handleEditClick = (violation) => {
         setEditingViolation({ ...violation });
@@ -174,30 +159,27 @@ const LogViolation = () => {
     const handleUpdateViolation = async (e) => {
         e.preventDefault();
         try {
-            // Calculate the correct points deducted for this violation in its new state
-            const targetDate = new Date(editingViolation.date);
-            const qKey = getQuarterKey(targetDate);
-            const { startDate, endDate } = getQuarterDates(qKey);
+            // Calculate penalty logic
+            let pointsToLog = 0;
 
-            const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
-            const qViolations = otherViolations.filter(v => {
-                const d = new Date(v.date);
-                return d >= startDate && d <= endDate;
-            });
+            // Immediate short-circuit for protected or covered (matching log mode logic)
+            if (editingViolation.protectedAbsence) {
+                pointsToLog = 0;
+            } else if (editingViolation.shiftCovered && editingViolation.type === VIOLATION_TYPES.CALLOUT) {
+                pointsToLog = 0;
+            } else {
+                const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
+                const beforeState = calculateUserState(otherViolations, data.settings);
+                // We must ensure the editingViolation passed to calculator has the correct flags if calculator respects them,
+                // but since we are handling pointsToLog manually for the record, we mainly care about the hypothetical state diff
+                // IF the calculator handles it.
+                // However, simpler approach:
+                // The 'pointsDeducted' field is what we are saving. 
+                // If it's not protected/covered, we calculate the impact.
 
-            const startPoints = calculateQuarterlyStart(qKey, otherViolations, data.settings);
-            const currentPointsWithoutThis = calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
-
-            const newPointsWithThis = calculateCurrentPoints(startPoints, [...qViolations, editingViolation], data.settings.violationPenalties);
-            const impact = newPointsWithThis - currentPointsWithoutThis;
-
-            // Update the violation with the calculated points (absolute value for storage, usually)
-            // But wait, pointsDeducted is usually positive for deductions.
-            // If impact is positive (added points), pointsDeducted might be stored as positive too?
-            // Let's check how addViolation does it.
-            // addViolation: const pointsToLog = Math.abs(impact);
-
-            const pointsToLog = Math.abs(impact);
+                const afterState = calculateUserState([...otherViolations, editingViolation], data.settings);
+                pointsToLog = Math.abs(afterState.points - beforeState.points);
+            }
 
             await updateViolation({ ...editingViolation, pointsDeducted: pointsToLog });
             setEditModalOpen(false);
@@ -219,16 +201,50 @@ const LogViolation = () => {
         }
     };
 
+    // --- Styles from Dashboard ---
+    const VIOLATION_STYLES = {
+        [VIOLATION_TYPES.TARDY_1_5]: { bg: '#dcfce7', color: '#059669', label: 'Tardy (1-5 min)' }, // Emerald 600
+        [VIOLATION_TYPES.TARDY_6_11]: { bg: '#dbeafe', color: '#2563EB', label: 'Tardy (6-11 min)' }, // Blue 600
+        [VIOLATION_TYPES.TARDY_12_29]: { bg: '#fef9c3', color: '#D97706', label: 'Tardy (12-29 min)' }, // Amber 600
+        [VIOLATION_TYPES.TARDY_30_PLUS]: { bg: '#fce7f3', color: '#DB2777', label: 'Tardy (30+ min)' }, // Pink 600
+        [VIOLATION_TYPES.CALLOUT]: { bg: '#fee2e2', color: '#DC2626', label: 'Call Out' }, // Red 600
+        [VIOLATION_TYPES.EARLY_ARRIVAL]: { bg: '#f3e8ff', color: '#6b21a8', label: 'Early Arrival' }, // Purple
+        [VIOLATION_TYPES.SHIFT_PICKUP]: { bg: '#ffedd5', color: '#9a3412', label: 'Shift Pickup' }, // Orange
+    };
+
+    const clearFilters = () => {
+        setFilterEmployeeId('');
+        setFilterStartDate('');
+        setFilterEndDate('');
+    };
+
+    // Helper for table row styling
+    const getViolationStyle = (type, isProtected, covered) => {
+        // User Rule: "If they are protected you can keep the same white text"
+        // User Rule: "callouts hwere the shift is covered that text can remain the same" (presumably default/white/grey)
+
+        if (isProtected) return { color: 'var(--text-primary)' }; // White/Default
+        if (covered) return { color: 'var(--text-primary)' }; // White/Default
+
+        // User Rule: "Update the colors for the violations based on the dashboard color schema per violation type."
+        return {
+            color: VIOLATION_STYLES[type]?.color || 'var(--text-primary)'
+            // We can also add bg if desired, but user specifically said "change the color of this text"
+            // Dashboard uses chips with BG, here we might just want text color or chip.
+            // "where it says violation type, I want the color of this text to match..." -> Implies text color.
+        };
+    };
+
     return (
-        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '1000px', margin: '0 auto', paddingBottom: '3rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <div>
                     <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         <AlertTriangle size={32} color="var(--accent-primary)" />
-                        {mode === 'log' ? 'Log Violation' : 'Edit Violations'}
+                        {mode === 'log' ? 'Log Violation' : 'Manage Violations'}
                     </h1>
                     <p style={{ color: 'var(--text-secondary)' }}>
-                        {mode === 'log' ? 'Record attendance violations and automatically calculate point deductions.' : 'View and edit past violations.'}
+                        {mode === 'log' ? 'Record attendance violations and automatically calculate point deductions.' : 'View, edit, or delete past violation records.'}
                     </p>
                 </div>
                 <button
@@ -244,15 +260,17 @@ const LogViolation = () => {
                         border: '1px solid var(--border-color)',
                         cursor: 'pointer',
                         fontWeight: '600',
-                        boxShadow: 'var(--shadow-sm)'
+                        boxShadow: 'var(--shadow-sm)',
+                        transition: 'all 0.2s'
                     }}
                 >
-                    {mode === 'log' ? <><Edit2 size={18} /> Edit Violations</> : <><ArrowLeft size={18} /> Back to Log</>}
+                    {mode === 'log' ? <><Edit2 size={18} /> Edit / View History</> : <><ArrowLeft size={18} /> Back to Log</>}
                 </button>
             </div>
 
             {mode === 'log' ? (
                 <form onSubmit={handleSubmit}>
+                    {/* ... Log Mode UI ... Kept mostly same but cleaner structure */}
                     <div style={{
                         backgroundColor: 'var(--bg-secondary)',
                         padding: '2rem',
@@ -264,7 +282,6 @@ const LogViolation = () => {
                         <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1.5rem' }}>Violation Details</h2>
 
                         <div style={{ display: 'grid', gap: '1.5rem' }}>
-                            {/* Employee Selection */}
                             <div style={{
                                 backgroundColor: 'var(--bg-primary)',
                                 padding: '0.75rem',
@@ -302,7 +319,6 @@ const LogViolation = () => {
                                 </select>
                             </div>
 
-                            {/* Violation Type */}
                             <div style={{
                                 backgroundColor: 'var(--bg-primary)',
                                 padding: '0.75rem',
@@ -338,9 +354,9 @@ const LogViolation = () => {
                                 </select>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                {/* Date */}
+                            <div style={{ display: 'flex', gap: '1rem' }}>
                                 <div style={{
+                                    flex: 1,
                                     backgroundColor: 'var(--bg-primary)',
                                     padding: '0.75rem',
                                     borderRadius: 'var(--radius-md)',
@@ -351,12 +367,13 @@ const LogViolation = () => {
                                         <Calendar size={18} color="var(--text-secondary)" />
                                         Date
                                     </label>
-                                    <input
-                                        type="date"
+                                    <ModernDatePicker
+                                        label={null}
+                                        showInputIcon={false}
                                         value={violationDate}
-                                        onChange={(e) => setViolationDate(e.target.value)}
+                                        onChange={setViolationDate}
                                         required
-                                        className="date-input-white-icon"
+                                        className="text-center-input"
                                         style={{
                                             width: '100%',
                                             padding: '0.75rem',
@@ -365,13 +382,14 @@ const LogViolation = () => {
                                             backgroundColor: '#343434',
                                             color: '#ffffff',
                                             fontSize: '1rem',
-                                            fontWeight: '500'
+                                            fontWeight: '500',
+                                            textAlign: 'center'
                                         }}
                                     />
                                 </div>
 
-                                {/* Shift */}
                                 <div style={{
+                                    flex: 1,
                                     backgroundColor: 'var(--bg-primary)',
                                     padding: '0.75rem',
                                     borderRadius: 'var(--radius-md)',
@@ -401,9 +419,11 @@ const LogViolation = () => {
                                         <option value="PM">PM</option>
                                     </select>
                                 </div>
+                            </div>
 
-                                {/* Shift Covered Checkbox - Only for Callouts */}
-                                {violationType === VIOLATION_TYPES.CALLOUT && (
+                            {/* Logic for specific types (Callout/Protected) */}
+                            {violationType === VIOLATION_TYPES.CALLOUT && (
+                                <>
                                     <div style={{
                                         backgroundColor: 'var(--bg-primary)',
                                         padding: '0.75rem',
@@ -419,93 +439,158 @@ const LogViolation = () => {
                                             id="shiftCovered"
                                             checked={shiftCovered}
                                             onChange={(e) => setShiftCovered(e.target.checked)}
-                                            style={{
-                                                width: '1.25rem',
-                                                height: '1.25rem',
-                                                marginRight: '0.75rem',
-                                                cursor: 'pointer',
-                                                accentColor: 'var(--accent-primary)'
-                                            }}
+                                            style={{ width: '1.25rem', height: '1.25rem', marginRight: '0.75rem', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
                                         />
                                         <label htmlFor="shiftCovered" style={{ cursor: 'pointer', fontWeight: '500', fontSize: '0.95rem' }}>
                                             Shift Covered? (No points deducted)
                                         </label>
                                     </div>
-                                )}
-                            </div>
+
+                                    <div style={{
+                                        backgroundColor: 'var(--bg-primary)',
+                                        padding: '1rem',
+                                        borderRadius: 'var(--radius-md)',
+                                        border: '1px solid var(--border-color)',
+                                        boxShadow: 'var(--shadow-sm)',
+                                        gridColumn: 'span 2',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '1rem'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                                            <input
+                                                type="checkbox"
+                                                id="isProtected"
+                                                checked={isProtected}
+                                                onChange={(e) => {
+                                                    setIsProtected(e.target.checked);
+                                                    if (!e.target.checked) {
+                                                        setProtectedReason('');
+                                                        setDocConfirmed(false);
+                                                    }
+                                                }}
+                                                style={{ width: '1.25rem', height: '1.25rem', marginRight: '0.75rem', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+                                            />
+                                            <label htmlFor="isProtected" style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                                                Protected Absence (No Points Deducted)
+                                            </label>
+                                        </div>
+
+                                        {isProtected && (
+                                            <div style={{ marginLeft: '2rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                                <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '4px', borderLeft: '4px solid var(--accent-warning)' }}>
+                                                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                                        <strong>Note:</strong> Standard doctor's notes for cold/flu do NOT excuse points.
+                                                    </p>
+                                                </div>
+                                                <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '500' }}>Reason:</label>
+                                                <select
+                                                    value={protectedReason}
+                                                    onChange={(e) => setProtectedReason(e.target.value)}
+                                                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', backgroundColor: '#343434', color: '#ffffff' }}
+                                                >
+                                                    <option value="">Select Reason...</option>
+                                                    {data.settings.protectedAbsenceReasons?.map(reason => (
+                                                        <option key={reason} value={reason}>{reason}</option>
+                                                    )) || ['Jury Duty', 'Military Service', 'Domestic Violence/Sexual Assault', 'Voting', 'ADA/Pregnancy'].map(reason => (
+                                                        <option key={reason} value={reason}>{reason}</option>
+                                                    ))}
+                                                </select>
+                                                <div style={{ display: 'flex', alignItems: 'center', marginTop: '0.5rem' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        id="docConfirmed"
+                                                        checked={docConfirmed}
+                                                        onChange={(e) => setDocConfirmed(e.target.checked)}
+                                                        style={{ width: '1.1rem', height: '1.1rem', marginRight: '0.5rem', cursor: 'pointer', accentColor: 'var(--accent-success)' }}
+                                                    />
+                                                    <label htmlFor="docConfirmed" style={{ cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500', color: docConfirmed ? 'var(--accent-success)' : 'var(--text-secondary)' }}>
+                                                        I confirm documentation is on file.
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
                         </div>
 
-                        {/* Summary Card */}
-                        {selectedEmployee && (
-                            <div style={{
-                                backgroundColor: 'var(--bg-secondary)',
-                                padding: '1.5rem',
-                                borderRadius: 'var(--radius-lg)',
-                                boxShadow: 'var(--shadow-md)',
-                                border: '1px solid var(--border-color)',
-                                marginBottom: '1.5rem'
-                            }}>
-                                <h3 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <CheckCircle size={20} />
-                                    Impact Summary
-                                </h3>
 
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
-                                    <div style={{
-                                        backgroundColor: 'var(--bg-primary)',
-                                        padding: '1rem',
-                                        borderRadius: 'var(--radius-md)',
-                                        textAlign: 'center'
-                                    }}>
-                                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Current Points</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--accent-primary)' }}>{currentPoints}</p>
-                                    </div>
+                        {/* Points Preview */}
+                        {selectedEmployeeId && (
+                            (() => {
+                                // Calculate days difference
+                                const today = new Date();
+                                // Reset time to midnight for accurate day calculation
+                                today.setHours(0, 0, 0, 0);
+                                const vDate = parseDate(violationDate);
+                                // Use simpler math: (today - vDate) / (1000 * 60 * 60 * 24)
+                                const diffTime = today - vDate;
+                                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                // Note: dates in future will have negative diffDays, which satisfies <= 7. 
+                                // We strictly want to hide if it is MORE than 7 days in the PAST.
 
-                                    <div style={{
-                                        backgroundColor: 'var(--bg-primary)',
-                                        padding: '1rem',
-                                        borderRadius: 'var(--radius-md)',
-                                        textAlign: 'center'
-                                    }}>
-                                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                                            {pointImpact >= 0 ? 'Points Added' : 'Deduction'}
-                                        </p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: '700', color: pointImpact >= 0 ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
-                                            {pointImpact >= 0 ? `+${pointImpact}` : pointImpact}
-                                        </p>
-                                    </div>
+                                if (diffDays > 7) {
+                                    return (
+                                        <div style={{
+                                            marginTop: '1.5rem',
+                                            padding: '1.25rem',
+                                            backgroundColor: 'rgba(239, 68, 68, 0.1)', // Red/Danger bg
+                                            borderRadius: 'var(--radius-md)',
+                                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                                            color: '#ef4444', // Red 500
+                                            textAlign: 'center',
+                                            fontWeight: '500'
+                                        }}>
+                                            Logging violation further than 7 days back, projected impact not available.
+                                        </div>
+                                    );
+                                }
 
+                                return (
                                     <div style={{
+                                        marginTop: '1.5rem',
+                                        padding: '1.25rem',
                                         backgroundColor: 'var(--bg-primary)',
-                                        padding: '1rem',
                                         borderRadius: 'var(--radius-md)',
-                                        textAlign: 'center'
+                                        border: '1px solid var(--border-color)',
                                     }}>
-                                        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>New Balance</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: '700', color: newPoints < 85 ? 'var(--accent-danger)' : 'var(--accent-success)' }}>{newPoints}</p>
+                                        <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--text-secondary)' }}>Projected Impact</h3>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', textAlign: 'center' }}>
+                                            <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Current Points</div>
+                                                <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                                                    {currentPoints}
+                                                </div>
+                                            </div>
+                                            <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Deduction</div>
+                                                <div style={{
+                                                    fontSize: '1.25rem',
+                                                    fontWeight: 'bold',
+                                                    color: impactData.deduction === 0 ? 'var(--text-secondary)' : 'var(--accent-danger)'
+                                                }}>
+                                                    {impactData.deduction === 0 ? '-' : `-${impactData.deduction}`}
+                                                </div>
+                                            </div>
+                                            <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>New Points</div>
+                                                <div style={{
+                                                    fontSize: '1.25rem',
+                                                    fontWeight: 'bold',
+                                                    color: impactData.newPoints < currentPoints ? 'var(--accent-danger)' : 'var(--text-primary)'
+                                                }}>
+                                                    {impactData.newPoints}
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
+                                );
+                            })()
                         )}
 
                         {/* Action Buttons */}
                         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '2rem' }}>
-                            <button
-                                type="button"
-                                onClick={() => navigate('/dashboard')}
-                                style={{
-                                    padding: '0.875rem 1.5rem',
-                                    borderRadius: 'var(--radius-md)',
-                                    backgroundColor: 'transparent',
-                                    color: 'var(--text-secondary)',
-                                    fontWeight: '600',
-                                    border: '1px solid var(--border-color)',
-                                    cursor: 'pointer',
-                                    fontSize: '1rem'
-                                }}
-                            >
-                                Cancel
-                            </button>
                             <button
                                 type="submit"
                                 disabled={isSubmitting || !selectedEmployeeId}
@@ -518,8 +603,7 @@ const LogViolation = () => {
                                     border: 'none',
                                     cursor: isSubmitting || !selectedEmployeeId ? 'not-allowed' : 'pointer',
                                     fontSize: '1rem',
-                                    boxShadow: 'var(--shadow-md)',
-                                    opacity: isSubmitting || !selectedEmployeeId ? 0.6 : 1
+                                    boxShadow: 'var(--shadow-md)'
                                 }}
                             >
                                 {isSubmitting ? 'Logging...' : 'Log Violation'}
@@ -528,173 +612,222 @@ const LogViolation = () => {
                     </div>
                 </form>
             ) : (
-                // --- Edit Mode View ---
+                // --- CUSTOM EDIT MODE UI ---
                 <div style={{
                     backgroundColor: 'var(--bg-secondary)',
-                    padding: '1.5rem',
                     borderRadius: 'var(--radius-lg)',
                     boxShadow: 'var(--shadow-md)',
-                    border: '1px solid var(--border-color)'
+                    border: '1px solid var(--border-color)',
+                    overflow: 'hidden'
                 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                        <h2 style={{ fontSize: '1.25rem', fontWeight: '600' }}>History</h2>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <select
-                                value={filterMode}
-                                onChange={(e) => handleModeChange(e.target.value)}
-                                style={{
-                                    padding: '0.5rem 1rem',
-                                    borderRadius: 'var(--radius-md)',
-                                    border: '1px solid var(--border-color)',
-                                    backgroundColor: 'var(--bg-primary)',
-                                    color: 'var(--text-primary)',
-                                    cursor: 'pointer',
-                                    fontWeight: 500,
-                                    fontSize: '0.9rem'
-                                }}
-                            >
-                                <option value="all">Show All</option>
-                                <option value="quarter">By Quarter</option>
-                                <option value="week">By Week</option>
-                            </select>
+                    {/* Filter Bar */}
+                    <div style={{
+                        padding: '1.5rem',
+                        borderBottom: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-primary)'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h2 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <Filter size={20} color="var(--text-secondary)" />
+                                Filter Violations
+                            </h2>
+                            {(filterEmployeeId || filterStartDate || filterEndDate) && (
+                                <button onClick={clearFilters} style={{ fontSize: '0.875rem', color: 'var(--accent-primary)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                                    Clear Filters
+                                </button>
+                            )}
+                        </div>
 
-                            {filterMode === 'quarter' && (
-                                <select
-                                    value={filterValue}
-                                    onChange={(e) => setFilterValue(e.target.value)}
+                        {/* Bulk Actions */}
+                        <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                            {sortedViolations.length > 0 && (
+                                <button
+                                    onClick={async () => {
+                                        const count = sortedViolations.length;
+                                        if (window.confirm(`Are you sure you want to delete ${count} violation${count !== 1 ? 's' : ''}? This action cannot be undone.`)) {
+                                            const ids = sortedViolations.map(v => v.id);
+                                            try {
+                                                await deleteViolations(ids);
+                                                alert(`Successfully deleted ${count} violations.`);
+                                            } catch (error) {
+                                                alert('Error deleting violations: ' + error.message);
+                                            }
+                                        }
+                                    }}
                                     style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
                                         padding: '0.5rem 1rem',
+                                        backgroundColor: 'rgba(220, 38, 38, 0.1)',
+                                        color: '#dc2626',
+                                        border: '1px solid rgba(220, 38, 38, 0.3)',
+                                        borderRadius: 'var(--radius-md)',
+                                        fontSize: '0.9rem',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        transition: 'background-color 0.2s'
+                                    }}
+                                >
+                                    <Trash2 size={16} />
+                                    Delete Listed ({sortedViolations.length})
+                                </button>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                            <div style={{ flexGrow: 1, minWidth: '250px' }}>
+                                <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Employee</label>
+                                <select
+                                    value={filterEmployeeId}
+                                    onChange={(e) => setFilterEmployeeId(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.6rem',
                                         borderRadius: 'var(--radius-md)',
                                         border: '1px solid var(--border-color)',
-                                        backgroundColor: 'var(--bg-primary)',
-                                        color: 'var(--text-primary)',
-                                        cursor: 'pointer',
-                                        fontWeight: 500,
+                                        backgroundColor: '#343434',
+                                        color: 'white',
                                         fontSize: '0.9rem'
                                     }}
                                 >
-                                    {availableQuarters.map(q => (
-                                        <option key={q} value={q}>{q}</option>
+                                    <option value="">All Employees</option>
+                                    {employees.sort((a, b) => a.name.localeCompare(b.name)).map(emp => (
+                                        <option key={emp.id} value={emp.id}>{emp.name}</option>
                                     ))}
                                 </select>
-                            )}
-
-                            {filterMode === 'week' && (
-                                <select
-                                    value={filterValue}
-                                    onChange={(e) => setFilterValue(e.target.value)}
-                                    style={{
-                                        padding: '0.5rem 1rem',
-                                        borderRadius: 'var(--radius-md)',
-                                        border: '1px solid var(--border-color)',
-                                        backgroundColor: 'var(--bg-primary)',
-                                        color: 'var(--text-primary)',
-                                        cursor: 'pointer',
-                                        fontWeight: 500,
-                                        fontSize: '0.9rem'
-                                    }}
-                                >
-                                    {availableWeeks.map(w => (
-                                        <option key={w} value={w}>{w}</option>
-                                    ))}
-                                </select>
-                            )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <div style={{ width: '150px' }}>
+                                    <ModernDatePicker
+                                        label="Start Date"
+                                        value={filterStartDate}
+                                        onChange={setFilterStartDate}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.6rem',
+                                            borderRadius: 'var(--radius-md)',
+                                            border: '1px solid var(--border-color)',
+                                            backgroundColor: '#343434',
+                                            color: 'white',
+                                            fontSize: '0.9rem'
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ width: '150px' }}>
+                                    <ModernDatePicker
+                                        label="End Date"
+                                        value={filterEndDate}
+                                        onChange={setFilterEndDate}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.6rem',
+                                            borderRadius: 'var(--radius-md)',
+                                            border: '1px solid var(--border-color)',
+                                            backgroundColor: '#343434',
+                                            color: 'white',
+                                            fontSize: '0.9rem'
+                                        }}
+                                    />
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <thead style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-secondary)', zIndex: 1 }}>
-                                <tr style={{ borderBottom: '2px solid var(--border-color)' }}>
-                                    <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-secondary)' }}>Date</th>
-                                    <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-secondary)' }}>Employee</th>
-                                    <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-secondary)' }}>Type</th>
-                                    <th style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)' }}>Points</th>
-                                    <th style={{ textAlign: 'right', padding: '1rem', color: 'var(--text-secondary)' }}>Actions</th>
+                    {/* Styled Table */}
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
+                            <thead style={{ backgroundColor: 'var(--bg-primary)', borderBottom: '2px solid var(--border-color)' }}>
+                                <tr>
+                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: 'var(--text-secondary)' }}>Date</th>
+                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: 'var(--text-secondary)' }}>Employee</th>
+                                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: 'var(--text-secondary)' }}>Violation Type</th>
+                                    <th style={{ padding: '1rem', textAlign: 'center', fontWeight: '600', color: 'var(--text-secondary)' }}>Impact</th>
+                                    <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: 'var(--text-secondary)' }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {sortedViolations.map(v => {
-                                    const emp = employees.find(e => e.id === v.employeeId);
-                                    return (
-                                        <tr key={v.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                            <td style={{ padding: '1rem' }}>{v.date}</td>
-                                            <td style={{ padding: '1rem', fontWeight: 500 }}>{emp?.name || 'Unknown'}</td>
-                                            <td style={{ padding: '1rem' }}>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                {sortedViolations.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="5" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                            No violations found matching your filters.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    sortedViolations.map((v) => {
+                                        const emp = employees.find(e => e.id === v.employeeId);
+                                        return (
+                                            <tr key={v.id} style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', transition: 'background-color 0.15s' }}>
+                                                <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>{parseDate(v.date).toLocaleDateString()}</td>
+                                                <td style={{ padding: '1rem', fontWeight: '500', color: 'var(--text-primary)' }}>{emp?.name || 'Unknown User'}</td>
+                                                <td style={{ padding: '1rem' }}>
                                                     <span style={{
-                                                        padding: '0.25rem 0.5rem',
-                                                        borderRadius: '4px',
-                                                        fontSize: '0.85rem',
-                                                        backgroundColor: v.type === VIOLATION_TYPES.CALLOUT ? 'var(--accent-danger-bg)' :
-                                                            (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? 'var(--accent-success-bg)' : 'var(--accent-warning-bg)',
-                                                        color: v.type === VIOLATION_TYPES.CALLOUT ? 'var(--accent-danger)' :
-                                                            (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? 'var(--accent-success)' : 'var(--accent-warning)',
-                                                        fontWeight: 500,
-                                                        width: 'fit-content'
+                                                        ...getViolationStyle(v.type, v.protectedAbsence, v.shiftCovered),
+                                                        fontWeight: '500',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.5rem'
                                                     }}>
-                                                        {v.type}
+                                                        {v.protectedAbsence && <CheckCircle size={14} />} {v.type}
                                                     </span>
-                                                    {v.shiftCovered && (
-                                                        <span style={{ fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight: '600' }}>
-                                                            Shift Covered
-                                                        </span>
+                                                    {v.protectedAbsence && <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>Protected: {v.protectedAbsenceReason}</span>}
+                                                    {v.shiftCovered && <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>Shift Covered</span>}
+                                                </td>
+                                                <td style={{ padding: '1rem', textAlign: 'center' }}>
+                                                    {v.pointsDeducted > 0 ? (
+                                                        <span style={{ color: 'var(--accent-danger)', fontWeight: '600', padding: '0.25rem 0.5rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px' }}>-{v.pointsDeducted}</span>
+                                                    ) : (
+                                                        <span style={{ color: 'var(--accent-success)', fontWeight: '600', padding: '0.25rem 0.5rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '4px' }}>0</span>
                                                     )}
-                                                </div>
-                                            </td>
-                                            <td style={{
-                                                padding: '1rem',
-                                                textAlign: 'center',
-                                                fontWeight: 'bold',
-                                                color: (v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? 'var(--accent-success)' : 'var(--accent-danger)'
-                                            }}>
-                                                {(v.type === VIOLATION_TYPES.EARLY_ARRIVAL || v.type === VIOLATION_TYPES.SHIFT_PICKUP) ? '+' : '-'}{v.pointsDeducted}
-                                            </td>
-                                            <td style={{ padding: '1rem', textAlign: 'right', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                                                <button
-                                                    onClick={() => handleEditClick(v)}
-                                                    style={{
-                                                        padding: '0.5rem',
-                                                        borderRadius: 'var(--radius-md)',
-                                                        border: '1px solid var(--border-color)',
-                                                        backgroundColor: 'transparent',
-                                                        cursor: 'pointer',
-                                                        color: 'var(--text-secondary)'
-                                                    }}
-                                                    title="Edit"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteClick(v.id)}
-                                                    style={{
-                                                        padding: '0.5rem',
-                                                        borderRadius: 'var(--radius-md)',
-                                                        border: '1px solid var(--border-color)',
-                                                        backgroundColor: 'transparent',
-                                                        cursor: 'pointer',
-                                                        color: 'var(--accent-danger)'
-                                                    }}
-                                                    title="Delete"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                                </td>
+                                                <td style={{ padding: '1rem', textAlign: 'right' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                                                        <button
+                                                            onClick={() => handleEditClick(v)}
+                                                            title="Edit"
+                                                            style={{
+                                                                padding: '0.4rem',
+                                                                borderRadius: '4px',
+                                                                border: '1px solid var(--border-color)',
+                                                                backgroundColor: 'var(--bg-primary)',
+                                                                color: 'var(--accent-primary)',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            <Edit2 size={16} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteClick(v.id)}
+                                                            title="Delete"
+                                                            style={{
+                                                                padding: '0.4rem',
+                                                                borderRadius: '4px',
+                                                                border: '1px solid var(--border-color)',
+                                                                backgroundColor: 'var(--bg-primary)',
+                                                                color: 'var(--accent-danger)',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                )}
                             </tbody>
                         </table>
                     </div>
                 </div>
-            )}
+            )
+            }
 
             {/* Edit Modal */}
             <Modal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit Violation">
                 {editingViolation && (
-                    <form onSubmit={handleUpdateViolation} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Violation Type</label>
+                    <form onSubmit={handleUpdateViolation}>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '500' }}>Violation Type</label>
                             <select
                                 value={editingViolation.type}
                                 onChange={(e) => setEditingViolation({ ...editingViolation, type: e.target.value })}
@@ -703,9 +836,8 @@ const LogViolation = () => {
                                     padding: '0.75rem',
                                     borderRadius: 'var(--radius-md)',
                                     border: '1px solid var(--border-color)',
-                                    fontSize: '1rem',
                                     backgroundColor: '#343434',
-                                    color: '#ffffff'
+                                    color: 'white'
                                 }}
                             >
                                 <option value={VIOLATION_TYPES.TARDY_1_5}>{VIOLATION_TYPES.TARDY_1_5}</option>
@@ -717,106 +849,110 @@ const LogViolation = () => {
                                 <option value={VIOLATION_TYPES.SHIFT_PICKUP}>{VIOLATION_TYPES.SHIFT_PICKUP}</option>
                             </select>
                         </div>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Date</label>
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '500' }}>Date</label>
                             <input
                                 type="date"
                                 value={editingViolation.date}
                                 onChange={(e) => setEditingViolation({ ...editingViolation, date: e.target.value })}
-                                required
                                 style={{
                                     width: '100%',
                                     padding: '0.75rem',
                                     borderRadius: 'var(--radius-md)',
                                     border: '1px solid var(--border-color)',
-                                    fontSize: '1rem',
                                     backgroundColor: '#343434',
-                                    color: '#ffffff'
+                                    color: 'white'
                                 }}
                             />
                         </div>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>Shift</label>
-                            <select
-                                value={editingViolation.shift || 'AM'}
-                                onChange={(e) => setEditingViolation({ ...editingViolation, shift: e.target.value })}
-                                style={{
-                                    width: '100%',
+
+                        {/* Shift Covered & Protected Absence Logic for Callouts */}
+                        {editingViolation.type === VIOLATION_TYPES.CALLOUT && (
+                            <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                {/* Shift Covered */}
+                                <div style={{
+                                    backgroundColor: 'var(--bg-primary)',
                                     padding: '0.75rem',
                                     borderRadius: 'var(--radius-md)',
                                     border: '1px solid var(--border-color)',
-                                    fontSize: '1rem',
-                                    backgroundColor: '#343434',
-                                    color: '#ffffff'
-                                }}
-                            >
-                                <option value="AM">AM</option>
-                                <option value="PM">PM</option>
-                            </select>
-                        </div>
+                                    display: 'flex',
+                                    alignItems: 'center'
+                                }}>
+                                    <input
+                                        type="checkbox"
+                                        id="editShiftCovered"
+                                        checked={editingViolation.shiftCovered || false}
+                                        onChange={(e) => setEditingViolation({ ...editingViolation, shiftCovered: e.target.checked })}
+                                        style={{ width: '1.25rem', height: '1.25rem', marginRight: '0.75rem', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+                                    />
+                                    <label htmlFor="editShiftCovered" style={{ cursor: 'pointer', fontWeight: '500', fontSize: '0.95rem' }}>
+                                        Shift Covered? (No points deducted)
+                                    </label>
+                                </div>
 
-                        {editingViolation.type === VIOLATION_TYPES.CALLOUT && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                <input
-                                    type="checkbox"
-                                    id="editShiftCovered"
-                                    checked={editingViolation.shiftCovered || false}
-                                    onChange={(e) => setEditingViolation({ ...editingViolation, shiftCovered: e.target.checked })}
-                                    style={{
-                                        width: '1.25rem',
-                                        height: '1.25rem',
-                                        cursor: 'pointer',
-                                        accentColor: 'var(--accent-primary)'
-                                    }}
-                                />
-                                <label htmlFor="editShiftCovered" style={{ cursor: 'pointer', fontWeight: '500', fontSize: '0.95rem' }}>
-                                    Shift Covered? (No points deducted)
-                                </label>
+                                {/* Protected Absence */}
+                                <div style={{
+                                    backgroundColor: 'var(--bg-primary)',
+                                    padding: '1rem',
+                                    borderRadius: 'var(--radius-md)',
+                                    border: '1px solid var(--border-color)',
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: editingViolation.protectedAbsence ? '1rem' : '0' }}>
+                                        <input
+                                            type="checkbox"
+                                            id="editIsProtected"
+                                            checked={editingViolation.protectedAbsence || false}
+                                            onChange={(e) => {
+                                                const isChecked = e.target.checked;
+                                                setEditingViolation({
+                                                    ...editingViolation,
+                                                    protectedAbsence: isChecked,
+                                                    // Clear related fields if unchecked
+                                                    protectedAbsenceReason: isChecked ? editingViolation.protectedAbsenceReason : '',
+                                                    documentationConfirmed: isChecked ? editingViolation.documentationConfirmed : false
+                                                });
+                                            }}
+                                            style={{ width: '1.25rem', height: '1.25rem', marginRight: '0.75rem', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+                                        />
+                                        <label htmlFor="editIsProtected" style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                                            Protected Absence
+                                        </label>
+                                    </div>
+
+                                    {editingViolation.protectedAbsence && (
+                                        <div style={{ marginLeft: '2rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                            <label style={{ display: 'block', fontSize: '0.9rem', fontWeight: '500' }}>Reason:</label>
+                                            <select
+                                                value={editingViolation.protectedAbsenceReason || ''}
+                                                onChange={(e) => setEditingViolation({ ...editingViolation, protectedAbsenceReason: e.target.value })}
+                                                style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', backgroundColor: '#343434', color: '#ffffff' }}
+                                            >
+                                                <option value="">Select Reason...</option>
+                                                {data.settings.protectedAbsenceReasons?.map(reason => (
+                                                    <option key={reason} value={reason}>{reason}</option>
+                                                )) || ['Jury Duty', 'Military Service', 'Domestic Violence/Sexual Assault', 'Voting', 'ADA/Pregnancy'].map(reason => (
+                                                    <option key={reason} value={reason}>{reason}</option>
+                                                ))}
+                                            </select>
+
+                                            <div style={{ display: 'flex', alignItems: 'center', marginTop: '0.5rem' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    id="editDocConfirmed"
+                                                    checked={editingViolation.documentationConfirmed || false}
+                                                    onChange={(e) => setEditingViolation({ ...editingViolation, documentationConfirmed: e.target.checked })}
+                                                    style={{ width: '1.1rem', height: '1.1rem', marginRight: '0.5rem', cursor: 'pointer', accentColor: 'var(--accent-success)' }}
+                                                />
+                                                <label htmlFor="editDocConfirmed" style={{ cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500', color: editingViolation.documentationConfirmed ? 'var(--accent-success)' : 'var(--text-secondary)' }}>
+                                                    I confirm documentation is on file.
+                                                </label>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
-                        {/* Recalculate points logic */}
-                        {editingViolation && (
-                            <div style={{
-                                backgroundColor: 'var(--bg-primary)',
-                                padding: '1rem',
-                                borderRadius: 'var(--radius-md)',
-                                marginTop: '0.5rem',
-                                border: '1px solid var(--border-color)'
-                            }}>
-                                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Estimated Points Impact</p>
-                                <p style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
-                                    {(() => {
-                                        // Calculate impact dynamically
-                                        const targetDate = new Date(editingViolation.date);
-                                        const qKey = getQuarterKey(targetDate);
-                                        const { startDate, endDate } = getQuarterDates(qKey);
-
-                                        const otherViolations = violations.filter(v => v.id !== editingViolation.id && v.employeeId === editingViolation.employeeId);
-                                        const qViolations = otherViolations.filter(v => {
-                                            const d = new Date(v.date);
-                                            return d >= startDate && d <= endDate;
-                                        });
-
-                                        const startPoints = calculateQuarterlyStart(qKey, otherViolations, data.settings);
-                                        const currentPointsWithoutThis = calculateCurrentPoints(startPoints, qViolations, data.settings.violationPenalties);
-
-                                        // Construct temp violation for calculation
-                                        const tempViolation = {
-                                            ...editingViolation,
-                                        };
-
-                                        const newPointsWithThis = calculateCurrentPoints(startPoints, [...qViolations, tempViolation], data.settings.violationPenalties);
-                                        const impact = newPointsWithThis - currentPointsWithoutThis;
-
-                                        // Update the editingViolation pointsDeducted if it changed (careful with infinite loop, so just display here and update on submit)
-                                        // Actually, we should update the state so it saves correctly.
-                                        // Let's use a useEffect for that.
-                                        return impact >= 0 ? `+${impact}` : impact;
-                                    })()}
-                                </p>
-                            </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
                             <button
                                 type="button"
                                 onClick={() => setEditModalOpen(false)}
@@ -825,9 +961,9 @@ const LogViolation = () => {
                                     borderRadius: 'var(--radius-md)',
                                     backgroundColor: 'transparent',
                                     color: 'var(--text-secondary)',
-                                    fontWeight: 500,
                                     border: 'none',
-                                    cursor: 'pointer'
+                                    cursor: 'pointer',
+                                    fontWeight: '500'
                                 }}
                             >
                                 Cancel
@@ -835,13 +971,13 @@ const LogViolation = () => {
                             <button
                                 type="submit"
                                 style={{
-                                    padding: '0.75rem 1.5rem',
-                                    borderRadius: 'var(--radius-md)',
                                     backgroundColor: 'var(--accent-primary)',
                                     color: 'white',
-                                    fontWeight: 600,
+                                    padding: '0.75rem 1.5rem',
                                     border: 'none',
-                                    cursor: 'pointer'
+                                    borderRadius: 'var(--radius-md)',
+                                    cursor: 'pointer',
+                                    fontWeight: '600'
                                 }}
                             >
                                 Save Changes
@@ -850,7 +986,7 @@ const LogViolation = () => {
                     </form>
                 )}
             </Modal>
-        </div>
+        </div >
     );
 };
 

@@ -56,12 +56,9 @@ export const parseDate = (dateStr) => {
     if (dateStr instanceof Date) return dateStr;
 
     // Explicitly handle "YYYY-MM-DD" to avoid timezone offset issues (UTC->Local)
-    if (typeof dateStr === 'string') {
-        // Handle "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss.sssZ" by taking first 10 chars
-        if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-            const [y, m, d] = dateStr.substring(0, 10).split('-').map(Number);
-            return new Date(y, m - 1, d); // Local Midnight
-        }
+    if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d); // Local Midnight
     }
 
     const d = new Date(dateStr);
@@ -89,7 +86,8 @@ export function groupConsecutiveCallouts(violations) {
                 const d1 = parseDate(current.date);
                 const d2 = parseDate(prev.date);
                 const diff = (d1 - d2) / (1000 * 60 * 60 * 24);
-                if (Math.abs(diff) === 1) {
+                // Allow exactly 1 day difference
+                if (Math.round(Math.abs(diff)) === 1) {
                     isConsecutive = true;
                     break;
                 }
@@ -106,7 +104,15 @@ export function groupConsecutiveCallouts(violations) {
  */
 export function calculateUserState(violations, settings = {}) {
     // 1. Sort violations chronologically
-    const sortedViolations = [...violations].sort((a, b) => parseDate(a.date) - parseDate(b.date));
+    let activeViolations = [...violations];
+
+    // Data Reset Logic: Filter out violations prior to resetEffectiveDate
+    if (settings.resetEffectiveDate) {
+        const resetDate = parseDate(settings.resetEffectiveDate);
+        activeViolations = activeViolations.filter(v => parseDate(v.date) >= resetDate);
+    }
+
+    const sortedViolations = activeViolations.sort((a, b) => parseDate(a.date) - parseDate(b.date));
 
     // 2. Initial State
     let currentPoints = 150;
@@ -199,11 +205,8 @@ export function calculateUserState(violations, settings = {}) {
                     currentPoints = 150;
                     tierStartDate = candidateDate;
                     latenessCounts = {}; // Reset escalations
-                    // daStageIndex = 0; // Maintain DA stage? User said "Reset back to 150", 
-                    // typically maintaining Tier 1 means you are clear.
-                    // Usually maintaining Tier 1 means DA stage is 0 (Good Standing).
+                    lastCalloutDate = null; // Reset consecutive tracking
                     daStageIndex = 0;
-
 
                     eventLog.push({
                         date: candidateDate,
@@ -227,11 +230,7 @@ export function calculateUserState(violations, settings = {}) {
 
                     tierStartDate = candidateDate;
                     latenessCounts = {}; // Reset all escalation counts
-
-                    // CRITICAL FIX: Reset DA Stage if we reached Good Standing
-                    if (currentTier.level === TIERS.GOOD.level) {
-                        daStageIndex = 0;
-                    }
+                    lastCalloutDate = null;
 
                     eventLog.push({
                         date: candidateDate,
@@ -328,7 +327,6 @@ export function calculateUserState(violations, settings = {}) {
             // array is 0-indexed
             const index = Math.min(currentCount - 1, penalties.length - 1);
             pointsDeducted = penalties[index];
-            // console.log(`[DEBUG] Processing ${v.type} on ${v.date}. Count=${currentCount}. Points=${pointsDeducted}. ConfigFound=${!!tardyConfig[v.type]}`);
             note = 'Violation';
         } else if (DEFAULT_POSITIVE_ADJUSTMENTS[v.type]) {
             pointsAdded = DEFAULT_POSITIVE_ADJUSTMENTS[v.type];
@@ -432,11 +430,6 @@ export function calculateUserState(violations, settings = {}) {
             tierStartDate = vDate;
             latenessCounts = {}; // Reset escalations
 
-            // CRITICAL FIX: Reset DA Stage if we reached Good Standing
-            if (currentTier.level === TIERS.GOOD.level) {
-                daStageIndex = 0;
-            }
-
             eventLog.push({
                 date: vDate,
                 type: 'promotion_points',
@@ -477,7 +470,7 @@ export function calculateUserState(violations, settings = {}) {
                 currentPoints = 150;
                 tierStartDate = candidateDate;
                 latenessCounts = {};
-                daStageIndex = 0; // Explicitly reset DA Index on Reset
+                daStageIndex = 0;
                 eventLog.push({
                     date: candidateDate,
                     type: 'reset',
@@ -496,11 +489,7 @@ export function calculateUserState(violations, settings = {}) {
                 currentTier = nextTier;
                 tierStartDate = candidateDate;
                 latenessCounts = {}; // Reset
-
-                // CRITICAL FIX: If collecting back to Tier 1, reset DA Stage
-                if (currentTier.level === TIERS.GOOD.level) {
-                    daStageIndex = 0;
-                }
+                if (currentTier.level === TIERS.GOOD.level) daStageIndex = 0;
 
                 eventLog.push({
                     date: candidateDate,
@@ -531,8 +520,6 @@ export function calculateUserState(violations, settings = {}) {
 
     return {
         points: currentPoints,
-        _debug_tier_: currentTier.name,
-        _debug_min_: currentTier.min,
         tier: currentTier,
         latenessCount: 0, // Legacy field, mostly irrelevant now
         tierStartDate,

@@ -1,9 +1,10 @@
 import React, { createContext, useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { calculateCurrentPoints, calculateQuarterlyStart, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTIES, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
+import { calculateCurrentPoints, calculateQuarterlyStart, calculateEmployeeState, DEFAULT_TARDY_PENALTIES, DEFAULT_CALLOUT_PENALTY, SURGE_CALLOUT_PENALTY, DEFAULT_POSITIVE_ADJUSTMENTS } from '../utils/pointCalculator';
 import { getCurrentQuarterDates } from '../utils/dateUtils';
 import { deepSanitize } from '../utils/dataUtils';
 import { useAuth } from './AuthContext';
 import { useDB } from '../hooks/useDB';
+import { calculateNewProbationState } from '../services/daService';
 
 const DataContext = createContext();
 
@@ -12,7 +13,8 @@ const DEFAULT_SETTINGS = {
     startingPoints: 25,
     violationPenalties: {
         tardy: DEFAULT_TARDY_PENALTIES,
-        callout: DEFAULT_CALLOUT_PENALTIES,
+        calloutStandard: DEFAULT_CALLOUT_PENALTY,
+        calloutSurge: SURGE_CALLOUT_PENALTY,
         positiveAdjustments: DEFAULT_POSITIVE_ADJUSTMENTS
     },
     reportUsage: {},
@@ -22,7 +24,20 @@ const DEFAULT_SETTINGS = {
         coaching: 100,
         severe: 75,
         final: 50
-    }
+    },
+    // Rolling Stabilization Defaults
+    stabilizationDays: 30,
+    calloutSurgeLookbackDays: 60,
+    surgeDeductionPoints: 40,
+    standardCalloutDeduction: 24,
+    // Protected Absence Reasons Default
+    protectedAbsenceReasons: [
+        'Jury Duty',
+        'Military Service',
+        'Domestic Violence/Sexual Assault',
+        'Voting',
+        'ADA/Pregnancy'
+    ]
 };
 
 export function DataProvider({ children }) {
@@ -144,7 +159,11 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         settings: DEFAULT_SETTINGS
     });
 
-    const [loading, setLoading] = useState(true);
+    const isPrintView = typeof window !== 'undefined' && window.location.hash.includes('print');
+
+    const [loading, setLoading] = useState(!isPrintView);
+    const [appMounted, setAppMounted] = useState(isPrintView); // Mount immediately if print view
+
     const [loadingProgress, setLoadingProgress] = useState(0);
     const [loadingMessage, setLoadingMessage] = useState('Initializing...');
 
@@ -154,44 +173,88 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         return `${year}-Q${q}`;
     };
 
-    const processDocs = useCallback((docs) => {
-        const employees = docs.filter(d => d.docType === 'employee');
-        const violations = docs.filter(d => d.docType === 'violation').map(v => ({ ...v, type: v.violationType || v.type }));
+    // Centralized State Derivation Logic
+    const deriveState = useCallback((docs) => {
         const settingsDoc = docs.find(d => d.docType === 'settings') || {};
         const settings = { ...DEFAULT_SETTINGS, ...settingsDoc };
-        const issuedDAs = docs.filter(d => d.docType === 'issuedDA').map(d => d.daKey);
+
+        // 1. FILTERING: Apply Reset Date Globally
+        const resetDate = settings.resetEffectiveDate ? new Date(settings.resetEffectiveDate) : null;
+
+        // Filter Violations
+        let violations = docs.filter(d => d.docType === 'violation').map(v => ({ ...v, type: v.violationType || v.type }));
+        if (resetDate) {
+            violations = violations.filter(v => new Date(v.date) >= resetDate);
+        }
+
+        // Filter Employees (if needed? usually we keep employees but reset their stats)
+        const employees = docs.filter(d => d.docType === 'employee');
+
+        // Filter Issued DAs (Visual only?)
+        // If we reset, we probably want to hide old issued DAs too
+        let issuedDAs = docs.filter(d => d.docType === 'issuedDA');
+        // Issued DAs don't strictly have a date in the root, but the key might? or we just clear them all if reset?
+        // Actually, for now, let's assume we maintain them unless they are explicitly cleared?
+        // PROPOSAL: If resetEffectiveDate is set, we ignore ALL previous DAs effectively.
+        // But issuedDAs usually come from `calculateNewProbationState` or similar logic. 
+        // If we want to hide them from the UI, we should filter them.
+        // Ideally issuedDA docs would have a date. They currently just have `daKey`.
+        // If we can't filter them by date, we might assume the "Reset" clears the view of them.
+        // Let's defer filtering DAs strictly until we know their date, BUT `calculateEmployeeState` 
+        // will return the *calculated* current DA stage.
+        // The `issuedDAs` array in data context is mostly used for "Has this been printed/issued?".
+        // Let's filter `issuedDAs` based on the collection only. 
+        const issuedDAKeys = issuedDAs.map(d => d.daKey);
 
         // Calculate points
-        const currentQuarterKey = getQuarterKey();
         const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
 
         const processedEmployees = employees.map(employee => {
             const employeeViolations = violations.filter(v => v.employeeId === employee._id);
-            const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, settings);
-            const currentQuarterViolations = employeeViolations.filter(v => {
-                const vDate = new Date(v.date);
-                return vDate >= qStart && vDate <= qEnd;
-            });
-            const currentPoints = calculateCurrentPoints(
-                startingPoints,
-                currentQuarterViolations,
-                settings.violationPenalties
-            );
-            return { ...employee, currentPoints, id: employee._id };
+
+            // Rolling Stabilization Logic
+            // The calculator ALREADY filters by resetEffectiveDate if passed settings.
+            // But since we already filtered `violations` above, we can pass the filtered list
+            // OR pass the original list and let calculator filter. 
+            // Passing filtered list is safer and more consistent.
+            const state = calculateEmployeeState(employee, employeeViolations, settings);
+
+            // Trigger Probation / DA Logic Update
+            // We should ensure probation state matches the reset reality
+            // calculateNewProbationState(employee, employeeViolations, settings) might need to be called here 
+            // to ensure the stored employee probation state is in sync with the visual score?
+            // For now, let's strictly trust the `calculateEmployeeState`.
+
+            return {
+                ...employee,
+                currentPoints: state.score,
+                tier: state.tier.name,
+                currentTier: state.tier,
+                lastTierChangeDate: state.lastTierChangeDate,
+                historyLog: state.historyLog,
+                id: employee._id
+            };
         });
 
-        setData({
+        return {
             employees: processedEmployees,
-            violations: violations.map(v => ({ ...v, id: v._id })),
+            violations: violations.map(v => ({ ...v, id: v._id })), // These are now FILTERED violations
             quarters: [],
-            issuedDAs,
+            issuedDAs: issuedDAKeys,
             settings
-        });
-        // Do NOT set loading false here. It must go through checkCompletion.
+        };
+
     }, []);
+
+    const processDocs = useCallback((docs) => {
+        const newState = deriveState(docs);
+        setData(newState);
+        // Do NOT set loading false here. It must go through checkCompletion.
+    }, [deriveState]);
 
     // Ref to track if minimum time has passed (just cosmetic now)
     const minTimePassedRef = useRef(false);
+    const completionTriggeredRef = useRef(false);
     const dataReadyRef = useRef(false);
 
     // 1. Dynamic Loading Logic
@@ -199,8 +262,14 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         const startTime = Date.now();
         const failsafeDuration = 60000; // 60 seconds failsafe for empty DBs
 
+        if (isPrintView) return; // Skip loading logic for print view
+
+
         // Progress bar interval (Visual only, targeting 60s roughly)
         const interval = setInterval(() => {
+            // STOP updating if we are finishing/finished
+            if (dataReadyRef.current) return;
+
             const elapsed = Date.now() - startTime;
             // Slower progress bar that asymptotes towards 90%
             setLoadingProgress(prev => {
@@ -211,7 +280,8 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             // Failsafe: If no data after 60 seconds, assume empty DB and let in
             if (elapsed >= failsafeDuration) {
                 console.warn('Loading failsafe triggered: No data found after 60s. Assuming empty DB.');
-                setLoading(false);
+                dataReadyRef.current = true; // Force ready
+                checkCompletion(); // Trigger the sequence
                 clearInterval(interval);
             }
         }, 600); // Update every 600ms
@@ -221,10 +291,34 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
 
     const checkCompletion = () => {
         // STRICT CHECK: Only load if we have data or if manual override (failsafe) occurred
-        if (dataReadyRef.current) {
-            console.log('Loading complete: Data detected.');
-            setLoadingProgress(100);
-            setTimeout(() => setLoading(false), 500); // Short delay for UI smoothness
+        // AND ensuring we only trigger the completion sequence ONCE
+        if (dataReadyRef.current && !completionTriggeredRef.current) {
+            completionTriggeredRef.current = true;
+
+            setLoadingMessage('Preparing Application...');
+            setLoadingProgress(75); // Jump to 75%
+
+            // PHASE 2: Mount the Application (behind the scenes)
+            setAppMounted(true);
+
+            // Animate from 75% to 100% over 8 seconds (to cover the 3s sync jump)
+            // We need to cover 25% in 8000ms -> 1% every 320ms
+            const finishInterval = setInterval(() => {
+                setLoadingProgress(prev => {
+                    if (prev >= 100) {
+                        clearInterval(finishInterval);
+                        return 100;
+                    }
+                    return prev + 1;
+                });
+            }, 320);
+
+            // PHASE 3: Wait 8 seconds for data to fill (and sync), then dismiss loading screen
+            setTimeout(() => {
+                clearInterval(finishInterval);
+                setLoadingProgress(100);
+                setLoading(false);
+            }, 8000);
         }
     };
 
@@ -282,14 +376,20 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                     // Empty result. 
                     // If live query is also empty, we just wait.
                     // Retry a few times just to be sure it's not a connection blip
-                    if (attempts < 5) {
+                    if (attempts < 10) { // Keep retrying for longer
                         attempts++;
                         setTimeout(fetchManual, 2000);
                     }
-                    // After 5 attempts, we stop spamming and just wait for the failsafe or live query
+                    // After 10 attempts, we stop spamming and just wait for the failsafe or live query
                 }
             } catch (e) {
-                console.error('DataContext: Manual fetch failed', e);
+                console.error(`DataContext: Manual fetch failed (attempt ${attempts + 1}):`, e);
+                // RETRY ON ERROR (CRDT not ready, missing indexes, etc)
+                if (attempts < 10) {
+                    attempts++;
+                    const delay = 1500 + (attempts * 500); // Backoff: 1.5s, 2s, 2.5s...
+                    setTimeout(fetchManual, delay);
+                }
             }
         };
 
@@ -302,7 +402,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         }
     }, [db, allDocs, processDocs, connected]);
 
-    console.log('DataProvider: organizationId', organizationId);
+    // console.log('DataProvider: organizationId', organizationId);
 
     // Helper to recursively remove undefined values - Moved to utils/dataUtils.js
     // const deepSanitize = ...
@@ -327,11 +427,12 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                 organizationId: organizationId || 'local-org',
                 active: true,
                 archived: false,
-                tier: 'Good Standing'
+                tier: 'Good Standing',
+                probation: { isOnProbation: false, highestLevel: 0, ncnsCount: 0 }
             };
 
             const newEmployee = deepSanitize(rawEmployee);
-            console.log('Adding employee (sanitized):', newEmployee);
+            // console.log('Adding employee (sanitized):', newEmployee);
 
             // Optimistic Update
             const tempId = 'temp-' + Date.now();
@@ -340,8 +441,9 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                 employees: [...prev.employees, { ...newEmployee, _id: tempId, id: tempId, currentPoints: data.settings.startingPoints }]
             }));
 
+
             const res = await safePut(newEmployee);
-            console.log('Employee added successfully, result:', res);
+            // console.log('Employee added successfully, result:', res);
         } catch (error) {
             console.error('Failed to add employee:', error);
             alert('Failed to add employee. See console for details.');
@@ -359,8 +461,23 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                 date,
                 shift,
                 pointsDeducted,
-                organizationId
+                organizationId,
+                // New Fields
+                shiftCovered: false, // Default
+                protectedAbsence: false,
+                protectedAbsenceReason: '',
+                documentationConfirmed: false
             };
+
+            // Handle optional argumentsObject for backward compatibility or new signature
+            if (typeof shift === 'object' && shift !== null) {
+                Object.assign(rawViolation, shift); // shift is actually options
+                if (!rawViolation.shift) rawViolation.shift = 'AM'; // fallback
+            } else {
+                if (arguments.length > 5) {
+                    rawViolation.shiftCovered = arguments[5];
+                }
+            }
             const newViolation = deepSanitize(rawViolation);
 
             // Optimistic Update
@@ -374,28 +491,35 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                 const employeeIndex = prev.employees.findIndex(e => e.id === employeeId);
                 let updatedEmployees = prev.employees;
 
+                let updatedEmployee = null;
+
                 if (employeeIndex !== -1) {
                     const employee = prev.employees[employeeIndex];
                     const employeeViolations = updatedViolations.filter(v => v.employeeId === employeeId);
 
-                    const currentQuarterKey = getQuarterKey();
-                    const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
+                    const state = calculateEmployeeState(employee, employeeViolations, prev.settings);
 
-                    const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, prev.settings);
+                    // --- RELAPSE / PROBATION LOGIC TRIGGER ---
+                    const probationState = calculateNewProbationState(employee, employeeViolations, prev.settings);
+                    // ------------------------------------------
 
-                    const currentQuarterViolations = employeeViolations.filter(v => {
-                        const vDate = new Date(v.date);
-                        return vDate >= qStart && vDate <= qEnd;
-                    });
-
-                    const currentPoints = calculateCurrentPoints(
-                        startingPoints,
-                        currentQuarterViolations,
-                        prev.settings.violationPenalties
-                    );
+                    updatedEmployee = {
+                        ...employee,
+                        currentPoints: state.score,
+                        tier: state.tier.name,
+                        currentTier: state.tier,
+                        lastTierChangeDate: state.lastTierChangeDate,
+                        probation: probationState // Persist new state
+                    };
 
                     updatedEmployees = [...prev.employees];
-                    updatedEmployees[employeeIndex] = { ...employee, currentPoints };
+                    updatedEmployees[employeeIndex] = updatedEmployee;
+                }
+
+                // If we updated the employee, we should perform the DB update for the employee too!
+                // We do this asynchronously below.
+                if (updatedEmployee) {
+                    safePut({ ...updatedEmployee, docType: 'employee' }); // Persist employee changes (Probation)
                 }
 
                 return {
@@ -429,24 +553,16 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                 const employee = prev.employees[employeeIndex];
                 const employeeViolations = updatedViolations.filter(v => v.employeeId === employeeId);
 
-                const currentQuarterKey = getQuarterKey();
-                const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
-
-                const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, prev.settings);
-
-                const currentQuarterViolations = employeeViolations.filter(v => {
-                    const vDate = new Date(v.date);
-                    return vDate >= qStart && vDate <= qEnd;
-                });
-
-                const currentPoints = calculateCurrentPoints(
-                    startingPoints,
-                    currentQuarterViolations,
-                    prev.settings.violationPenalties
-                );
+                const state = calculateEmployeeState(employee, employeeViolations, prev.settings);
 
                 updatedEmployees = [...prev.employees];
-                updatedEmployees[employeeIndex] = { ...employee, currentPoints };
+                updatedEmployees[employeeIndex] = {
+                    ...employee,
+                    currentPoints: state.score,
+                    tier: state.tier.name,
+                    currentTier: state.tier,
+                    lastTierChangeDate: state.lastTierChangeDate
+                };
             }
 
             return {
@@ -474,24 +590,16 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                     const employee = prev.employees[employeeIndex];
                     const employeeViolations = updatedViolations.filter(v => v.employeeId === employeeId);
 
-                    const currentQuarterKey = getQuarterKey();
-                    const { startDate: qStart, endDate: qEnd } = getCurrentQuarterDates();
-
-                    const startingPoints = calculateQuarterlyStart(currentQuarterKey, employeeViolations, prev.settings);
-
-                    const currentQuarterViolations = employeeViolations.filter(v => {
-                        const vDate = new Date(v.date);
-                        return vDate >= qStart && vDate <= qEnd;
-                    });
-
-                    const currentPoints = calculateCurrentPoints(
-                        startingPoints,
-                        currentQuarterViolations,
-                        prev.settings.violationPenalties
-                    );
+                    const state = calculateEmployeeState(employee, employeeViolations, prev.settings);
 
                     updatedEmployees = [...prev.employees];
-                    updatedEmployees[employeeIndex] = { ...employee, currentPoints };
+                    updatedEmployees[employeeIndex] = {
+                        ...employee,
+                        currentPoints: state.score,
+                        tier: state.tier.name,
+                        currentTier: state.tier,
+                        lastTierChangeDate: state.lastTierChangeDate
+                    };
                 }
             }
 
@@ -502,6 +610,47 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             };
         });
         await db.del(violationId);
+    };
+
+    const deleteViolations = async (violationIds) => {
+        if (!violationIds || violationIds.length === 0) return;
+
+        // Optimistic Update
+        setData(prev => {
+            const updatedViolations = prev.violations.filter(v => !violationIds.includes(v.id));
+            const deletedViolations = prev.violations.filter(v => violationIds.includes(v.id));
+
+            // Find all affected employees
+            const affectedEmployeeIds = new Set(deletedViolations.map(v => v.employeeId));
+            let updatedEmployees = [...prev.employees];
+
+            affectedEmployeeIds.forEach(empId => {
+                const index = updatedEmployees.findIndex(e => e.id === empId);
+                if (index !== -1) {
+                    const employee = updatedEmployees[index];
+                    const employeeViolations = updatedViolations.filter(v => v.employeeId === empId);
+
+                    const state = calculateEmployeeState(employee, employeeViolations, prev.settings);
+
+                    updatedEmployees[index] = {
+                        ...employee,
+                        currentPoints: state.score,
+                        tier: state.tier.name,
+                        currentTier: state.tier,
+                        lastTierChangeDate: state.lastTierChangeDate
+                    };
+                }
+            });
+
+            return {
+                ...prev,
+                violations: updatedViolations,
+                employees: updatedEmployees
+            };
+        });
+
+        // Delete from DB in parallel
+        await Promise.all(violationIds.map(id => db.del(id)));
     };
 
     const issueDA = async (daKey) => {
@@ -519,13 +668,39 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
 
     const updateSettings = async (newSettings) => {
         const currentSettingsDoc = allDocs.docs.find(d => d.docType === 'settings') || { docType: 'settings' };
-        const sanitized = deepSanitize({ ...currentSettingsDoc, ...newSettings, docType: 'settings' });
+        const mergedSettings = { ...DEFAULT_SETTINGS, ...currentSettingsDoc, ...newSettings };
+        const sanitized = deepSanitize({ ...mergedSettings, docType: 'settings' });
 
         // Optimistic Update
-        setData(prev => ({
-            ...prev,
-            settings: { ...prev.settings, ...newSettings }
-        }));
+        setData(prev => {
+            const updatedEmployees = prev.employees.map(employee => {
+                const employeeViolations = prev.violations.filter(v => v.employeeId === employee.id);
+                // Recalculate with NEW settings
+                const state = calculateEmployeeState(employee, employeeViolations, mergedSettings);
+
+                // Tricky: we need to preserve probation state if it's not being recalculated here?
+                // actually calculateEmployeeState returns the main score/tier.
+                // WE SHOULD probably re-run calculateNewProbationState too if we want to be 100% correct,
+                // but for a "Reset", usually we just want scores reset. 
+                // IF resetEffectiveDate is set, calculateEmployeeState handles the filtering.
+
+                return {
+                    ...employee,
+                    currentPoints: state.score,
+                    tier: state.tier.name,
+                    currentTier: state.tier,
+                    lastTierChangeDate: state.lastTierChangeDate,
+                    // We might need to update probation state logic here too if reset affects it,
+                    // but for now let's focus on the main score/tier reset.
+                };
+            });
+
+            return {
+                ...prev,
+                settings: mergedSettings,
+                employees: updatedEmployees
+            };
+        });
 
         await safePut(sanitized);
     };
@@ -605,7 +780,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             reader.onload = async (e) => {
                 try {
                     const imported = JSON.parse(e.target.result);
-                    console.log('Starting import...');
+                    // console.log('Starting import...');
 
                     // 1. Fetch Live Context from DB (Directly) to ensure Real IDs
                     const allDocsResult = await db.allDocs();
@@ -619,7 +794,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                         }
                     });
 
-                    console.log(`Loaded ${liveContextMap.size} active employees from DB for matching.`);
+                    // console.log(`Loaded ${liveContextMap.size} active employees from DB for matching.`);
 
                     // 2. Build JSON Lookup: Map<Legacy_JSON_UUID, Name>
                     const legacyJsonMap = new Map();
@@ -690,10 +865,15 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                             batches.push(violationsToImport.slice(i, i + BATCH_SIZE));
                         }
 
-                        console.log(`Prepared ${violationsToImport.length} violations for import in ${batches.length} batches.`);
+                        // console.log(`Prepared ${violationsToImport.length} violations for import in ${batches.length} batches.`);
 
                         for (let i = 0; i < batches.length; i++) {
                             const batch = batches[i];
+
+                            // Log progress to console
+                            const percent = Math.round(((i + 1) / batches.length) * 100);
+                            console.log(`Importing Database: ${percent}% complete`);
+
                             setLoadingMessage(`Importing safe batch ${i + 1} of ${batches.length}...`);
 
                             // 1. Insert batch in parallel
@@ -708,7 +888,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                         }
                     }
 
-                    console.log(`Import finished. Added: ${addedCount}, Skipped: ${skippedCount}. Waiting safely...`);
+                    // console.log(`Import finished. Added: ${addedCount}, Skipped: ${skippedCount}. Waiting safely...`);
                     // Final Settling Delay
                     await new Promise(r => setTimeout(r, 2000));
 
@@ -755,14 +935,14 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
                 return;
             }
 
-            console.log(`Nuclear Reset: Deleting ${docs.length} documents...`);
+            // console.log(`Nuclear Reset: Deleting ${docs.length} documents...`);
 
             // Delete all documents
             for (const doc of docs) {
                 await db.del(doc._id);
             }
 
-            console.log('Nuclear Reset: Complete.');
+            // console.log('Nuclear Reset: Complete.');
             // Force reload to clear state
             window.location.reload();
         } catch (error) {
@@ -780,6 +960,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         addViolation,
         updateViolation,
         deleteViolation,
+        deleteViolations,
         reload: () => { }, // No-op as it's live
         exportDatabase,
         importDatabase,
@@ -794,47 +975,49 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         nuclearReset
     };
 
-    if (loading) {
-        return (
-            <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                height: '100vh',
-                backgroundColor: '#000000', // Black background
-                color: '#f3f4f6', // Light text
-                fontFamily: 'system-ui, -apple-system, sans-serif',
-                flexDirection: 'column'
-            }}>
-                <div style={{ textAlign: 'center', width: '300px' }}>
-                    <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>{loadingMessage}</h2>
-
-                    {/* Progress Bar Container */}
-                    <div style={{
-                        width: '100%',
-                        height: '10px',
-                        backgroundColor: '#374151', // Darker gray container
-                        borderRadius: '5px',
-                        overflow: 'hidden',
-                        marginBottom: '0.5rem'
-                    }}>
-                        {/* Progress Bar Fill */}
-                        <div style={{
-                            width: `${loadingProgress}%`,
-                            height: '100%',
-                            backgroundColor: '#ef4444', // Red fill
-                            transition: 'width 0.3s ease-in-out'
-                        }}></div>
-                    </div>
-                    <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{loadingProgress}%</div>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <DataContext.Provider value={value}>
-            {children}
+            {loading && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100vw',
+                    height: '100vh',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    backgroundColor: '#000000', // Black background
+                    color: '#f3f4f6', // Light text
+                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                    flexDirection: 'column',
+                    zIndex: 9999 // Ensure it sits on top
+                }}>
+                    <div style={{ textAlign: 'center', width: '300px' }}>
+                        <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>{loadingMessage}</h2>
+
+                        {/* Progress Bar Container */}
+                        <div style={{
+                            width: '100%',
+                            height: '10px',
+                            backgroundColor: '#374151', // Darker gray container
+                            borderRadius: '5px',
+                            overflow: 'hidden',
+                            marginBottom: '0.5rem'
+                        }}>
+                            {/* Progress Bar Fill */}
+                            <div style={{
+                                width: `${loadingProgress}%`,
+                                height: '100%',
+                                backgroundColor: '#ef4444', // Red fill
+                                transition: 'width 0.3s ease-in-out'
+                            }}></div>
+                        </div>
+                        <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{loadingProgress}%</div>
+                    </div>
+                </div>
+            )}
+            {appMounted && children}
         </DataContext.Provider>
     );
 }
