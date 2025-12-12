@@ -54,9 +54,31 @@ export function useDB() {
                 }
 
                 const netlifyUrl = origin.replace(/^https?/, 'netlify');
-                const connection = await connect(database, dbName, netlifyUrl);
-                connectionRef.current = dbName;
-                setConnected(true);
+
+                // Retry logic for connection (to handle Netlify password prompt delays)
+                let retryAttempts = 0;
+                const maxAttempts = 8;
+                let isConnected = false;
+
+                while (retryAttempts < maxAttempts && !isConnected) {
+                    try {
+                        retryAttempts++;
+                        await connect(database, dbName, netlifyUrl);
+                        connectionRef.current = dbName;
+                        setConnected(true);
+                        isConnected = true;
+                    } catch (e) {
+                        console.warn(`Connection attempt ${retryAttempts}/${maxAttempts} failed:`, e.message);
+                        if (retryAttempts < maxAttempts) {
+                            // Exponential backoff: 1s, 1.5s, 2.25s, ... 
+                            // Total wait time approx 49s for 8 attempts
+                            const delay = 1000 * Math.pow(1.5, retryAttempts - 1);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        } else {
+                            throw e; // Use the outer catch block for final failure
+                        }
+                    }
+                }
 
                 // Debug: Check if data is actually in the DB with polling
                 let attempts = 0;

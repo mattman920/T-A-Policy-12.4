@@ -1,4 +1,4 @@
-// Constants
+// Constants - Updated for consistency
 export const STARTING_POINTS = 150; // New default
 
 export const TIERS = {
@@ -30,14 +30,14 @@ export const DA_STAGES = [
 ];
 
 export const DEFAULT_TARDY_PENALTIES = {
-    [VIOLATION_TYPES.TARDY_1_5]: [3, 6, 10, 15],
-    [VIOLATION_TYPES.TARDY_6_11]: [5, 10, 15, 20],
-    [VIOLATION_TYPES.TARDY_12_29]: [15, 20, 25, 30], // Updated: Starts at 15
-    [VIOLATION_TYPES.TARDY_30_PLUS]: [15, 20, 25, 30]
+    [VIOLATION_TYPES.TARDY_1_5]: [3, 6, 15, 25],
+    [VIOLATION_TYPES.TARDY_6_11]: [7, 17, 25, 25],
+    [VIOLATION_TYPES.TARDY_12_29]: [21, 25, 25, 25],
+    [VIOLATION_TYPES.TARDY_30_PLUS]: [24, 25, 25, 25]
 };
 
-export const DEFAULT_CALLOUT_PENALTY = 24;
-export const SURGE_CALLOUT_PENALTY = 40;
+export const DEFAULT_CALLOUT_PENALTY = 16;
+export const SURGE_CALLOUT_PENALTY = 25;
 export const SURGE_LOOKBACK_DAYS = 60;
 export const TIER_MONITORING_WINDOW = 30;
 

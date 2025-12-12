@@ -5,10 +5,13 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 
+import ExitAppModal from './ExitAppModal';
+
 const Sidebar = () => {
     const { isDark, toggleTheme } = useTheme();
     const { data } = useData();
     const { logout } = useAuth();
+    const [isExitModalOpen, setIsExitModalOpen] = React.useState(false);
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -104,10 +107,7 @@ const Sidebar = () => {
                 </button>
 
                 <button
-                    onClick={async () => {
-                        await logout();
-                        // Optional: redirect or reload if needed, but AuthContext change should trigger re-render/redirect
-                    }}
+                    onClick={() => setIsExitModalOpen(true)}
                     style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -129,12 +129,14 @@ const Sidebar = () => {
                     }}
                 >
                     <LogOut size={20} />
-                    <span style={{ fontWeight: 500 }}>Sign Out</span>
+                    <span style={{ fontWeight: 500 }}>Exit App</span>
                 </button>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-sidebar-muted)', textAlign: 'center', opacity: 0.6 }}>
-                    v1.1.0 • Build 2023
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-sidebar-muted)', textAlign: 'center', opacity: 0.6, marginTop: '1rem' }}>
+                    v1.1.2 • Build 2023
                 </div>
             </div>
+
+            <ExitAppModal isOpen={isExitModalOpen} onClose={() => setIsExitModalOpen(false)} />
         </div>
     );
 };

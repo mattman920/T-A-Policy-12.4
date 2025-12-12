@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '../contexts/DataContext';
-import { AlertTriangle, Save, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, Save, ArrowLeft, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
     DEFAULT_TARDY_PENALTIES,
@@ -16,23 +16,62 @@ const ViolationPenalties = () => {
     const navigate = useNavigate();
 
     // Initial State Setup
-    const [violationPenalties, setViolationPenalties] = useState({
-        tardy: DEFAULT_TARDY_PENALTIES,
-        calloutStandard: DEFAULT_CALLOUT_PENALTY,
-        calloutSurge: SURGE_CALLOUT_PENALTY,
-        surgeLookback: SURGE_LOOKBACK_DAYS,
-        positiveAdjustments: DEFAULT_POSITIVE_ADJUSTMENTS,
-        ...data?.settings?.violationPenalties // Overwrite defaults if saved
+    // Initial State Setup
+    const [violationPenalties, setViolationPenalties] = useState(() => {
+        // Create a fresh deep copy of defaults to avoid reference issues
+        const defaults = {
+            tardy: JSON.parse(JSON.stringify(DEFAULT_TARDY_PENALTIES)),
+            calloutStandard: DEFAULT_CALLOUT_PENALTY,
+            calloutSurge: SURGE_CALLOUT_PENALTY,
+            surgeLookback: SURGE_LOOKBACK_DAYS,
+            positiveAdjustments: { ...DEFAULT_POSITIVE_ADJUSTMENTS }
+        };
+
+        // If we have saved data, merge it on top of defaults
+        if (data?.settings?.violationPenalties) {
+            return {
+                ...defaults,
+                ...data.settings.violationPenalties,
+                // Ensure nested objects are also merged if they exist in saved data, 
+                // but fall back to defaults if they don't (though top-level merge covers most cases)
+                tardy: {
+                    ...defaults.tardy,
+                    ...(data.settings.violationPenalties.tardy || {})
+                },
+                positiveAdjustments: {
+                    ...defaults.positiveAdjustments,
+                    ...(data.settings.violationPenalties.positiveAdjustments || {})
+                }
+            };
+        }
+
+        return defaults;
     });
 
+    // We only want to update state from 'data' if 'data' effectively changes 
+    // AND it has content that might be newer/different than what we initialized with (e.g. async load).
+    // However, repeatedly overwriting local state with 'data' can block user edits if 'data' re-fetches frequently.
+    // A common pattern is to sync only once or strictly when data.settings.violationPenalties is definitely populated.
     useEffect(() => {
         if (data?.settings?.violationPenalties) {
-            setViolationPenalties(prev => ({
-                ...prev,
-                ...data.settings.violationPenalties
-            }));
+            setViolationPenalties(prev => {
+                // simple comparison to avoid unnecessary renders or overwrites could be added here
+                // but for now, we just ensure we merge effectively.
+                return {
+                    ...prev,
+                    ...data.settings.violationPenalties,
+                    tardy: {
+                        ...prev.tardy,
+                        ...(data.settings.violationPenalties.tardy || {})
+                    },
+                    positiveAdjustments: {
+                        ...prev.positiveAdjustments,
+                        ...(data.settings.violationPenalties.positiveAdjustments || {})
+                    }
+                };
+            });
         }
-    }, [data]);
+    }, [data?.settings?.violationPenalties]);
 
     const handleSave = async () => {
         await updateSettings({
@@ -40,6 +79,28 @@ const ViolationPenalties = () => {
             violationPenalties
         });
         alert('Violation penalties saved successfully!');
+    };
+
+    const handleReset = async () => {
+        // Debugging verification
+        const firstTardy = DEFAULT_TARDY_PENALTIES[VIOLATION_TYPES.TARDY_1_5];
+        if (confirm(`Reset all penalties to system defaults? \n\nStandard Callout: ${DEFAULT_CALLOUT_PENALTY} pts\nSurge Callout: ${SURGE_CALLOUT_PENALTY} pts\nTardy 1-5min: [${firstTardy.join(', ')}] pts\n\nThis will overwrite your current configurations.`)) {
+            // Fresh defaults
+            const defaults = {
+                tardy: JSON.parse(JSON.stringify(DEFAULT_TARDY_PENALTIES)),
+                calloutStandard: DEFAULT_CALLOUT_PENALTY,
+                calloutSurge: SURGE_CALLOUT_PENALTY,
+                surgeLookback: SURGE_LOOKBACK_DAYS,
+                positiveAdjustments: { ...DEFAULT_POSITIVE_ADJUSTMENTS }
+            };
+
+            setViolationPenalties(defaults);
+            // Optional: Auto-save reset
+            await updateSettings({
+                ...data.settings,
+                violationPenalties: defaults
+            });
+        }
     };
 
     const handleTardyChange = (type, index, value) => {
@@ -106,24 +167,44 @@ const ViolationPenalties = () => {
                     </button>
                     <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>Violation Penalties</h1>
                 </div>
-                <button
-                    onClick={handleSave}
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        padding: '0.75rem 1.5rem',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: 'var(--accent-primary)',
-                        color: '#fff',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontWeight: '600',
-                        boxShadow: 'var(--shadow-md)'
-                    }}
-                >
-                    <Save size={18} /> Save Changes
-                </button>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button
+                        onClick={handleReset}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.75rem 1rem',
+                            borderRadius: 'var(--radius-md)',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            color: 'var(--accent-danger)',
+                            border: '1px solid var(--accent-danger)',
+                            cursor: 'pointer',
+                            fontWeight: '600',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <RotateCcw size={18} /> Reset Defaults
+                    </button>
+                    <button
+                        onClick={handleSave}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.75rem 1.5rem',
+                            borderRadius: 'var(--radius-md)',
+                            backgroundColor: 'var(--accent-primary)',
+                            color: '#fff',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: '600',
+                            boxShadow: 'var(--shadow-md)'
+                        }}
+                    >
+                        <Save size={18} /> Save Changes
+                    </button>
+                </div>
             </div>
 
             <section style={sectionStyle}>

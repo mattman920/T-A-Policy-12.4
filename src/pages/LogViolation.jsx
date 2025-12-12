@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useData } from '../contexts/DataContext';
 import { calculateUserState, calculateViolationPenalty, VIOLATION_TYPES, parseDate } from '../utils/pointCalculator';
-import { AlertTriangle, CheckCircle, User, Clock, Edit2, ArrowLeft, Save, X, Trash2, PlusCircle, Search, Filter, Calendar } from 'lucide-react';
+import { AlertTriangle, CheckCircle, User, Clock, Edit2, ArrowLeft, Save, X, Trash2, PlusCircle, Search, Filter, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import ModernDatePicker from '../components/ModernDatePicker';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
@@ -58,13 +58,17 @@ const LogViolation = () => {
         // 1. Calculate Deduction Amount exactly as the system would
         const deduction = calculateViolationPenalty(tempViolation, empViolations, data.settings);
 
+        // Determine if this is a positive adjustment type
+        const isPositive = [VIOLATION_TYPES.EARLY_ARRIVAL, VIOLATION_TYPES.SHIFT_PICKUP].includes(violationType);
+
         // 2. Calculate New Total Score
         // We still run calculateUserState to get the final score which includes tier resets etc.
         const newState = calculateUserState([...empViolations, tempViolation], data.settings);
 
         return {
             deduction,
-            newPoints: newState.points
+            newPoints: newState.points,
+            isPositive
         };
     };
 
@@ -134,6 +138,10 @@ const LogViolation = () => {
     const currentPoints = useMemo(() => getCurrentPoints(), [selectedEmployeeId, violations, data.settings]);
     const newPoints = impactData.newPoints;
 
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 50;
+
     // --- Edit Mode Logic ---
     const sortedViolations = useMemo(() => {
         let filtered = [...violations];
@@ -150,6 +158,18 @@ const LogViolation = () => {
 
         return filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
     }, [violations, filterEmployeeId, filterStartDate, filterEndDate]);
+
+    // Reset to page 1 when filters change
+    React.useEffect(() => {
+        setCurrentPage(1);
+    }, [filterEmployeeId, filterStartDate, filterEndDate]);
+
+    const paginatedViolations = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        return sortedViolations.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [sortedViolations, currentPage]);
+
+    const totalPages = Math.ceil(sortedViolations.length / ITEMS_PER_PAGE);
 
     const handleEditClick = (violation) => {
         setEditingViolation({ ...violation });
@@ -564,13 +584,15 @@ const LogViolation = () => {
                                                 </div>
                                             </div>
                                             <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Deduction</div>
+                                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                                                    {impactData.isPositive ? 'Adjustment' : 'Deduction'}
+                                                </div>
                                                 <div style={{
                                                     fontSize: '1.25rem',
                                                     fontWeight: 'bold',
-                                                    color: impactData.deduction === 0 ? 'var(--text-secondary)' : 'var(--accent-danger)'
+                                                    color: impactData.deduction === 0 ? 'var(--text-secondary)' : (impactData.isPositive ? 'var(--accent-success)' : 'var(--accent-danger)')
                                                 }}>
-                                                    {impactData.deduction === 0 ? '-' : `-${impactData.deduction}`}
+                                                    {impactData.deduction === 0 ? '-' : (impactData.isPositive ? `+${impactData.deduction}` : `-${impactData.deduction}`)}
                                                 </div>
                                             </div>
                                             <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
@@ -578,7 +600,7 @@ const LogViolation = () => {
                                                 <div style={{
                                                     fontSize: '1.25rem',
                                                     fontWeight: 'bold',
-                                                    color: impactData.newPoints < currentPoints ? 'var(--accent-danger)' : 'var(--text-primary)'
+                                                    color: impactData.newPoints < currentPoints ? 'var(--accent-danger)' : (impactData.newPoints > currentPoints ? 'var(--accent-success)' : 'var(--text-primary)')
                                                 }}>
                                                     {impactData.newPoints}
                                                 </div>
@@ -753,7 +775,8 @@ const LogViolation = () => {
                                         </td>
                                     </tr>
                                 ) : (
-                                    sortedViolations.map((v) => {
+                                    paginatedViolations && paginatedViolations.map((v) => {
+                                        if (!v) return null;
                                         const emp = employees.find(e => e.id === v.employeeId);
                                         return (
                                             <tr key={v.id} style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', transition: 'background-color 0.15s' }}>
@@ -773,11 +796,19 @@ const LogViolation = () => {
                                                     {v.shiftCovered && <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>Shift Covered</span>}
                                                 </td>
                                                 <td style={{ padding: '1rem', textAlign: 'center' }}>
-                                                    {v.pointsDeducted > 0 ? (
-                                                        <span style={{ color: 'var(--accent-danger)', fontWeight: '600', padding: '0.25rem 0.5rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px' }}>-{v.pointsDeducted}</span>
-                                                    ) : (
-                                                        <span style={{ color: 'var(--accent-success)', fontWeight: '600', padding: '0.25rem 0.5rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '4px' }}>0</span>
-                                                    )}
+                                                    {(() => {
+                                                        const isPositive = [VIOLATION_TYPES.EARLY_ARRIVAL, VIOLATION_TYPES.SHIFT_PICKUP].includes(v.type);
+                                                        if (v.pointsDeducted > 0) {
+                                                            return isPositive ? (
+                                                                <span style={{ color: 'var(--accent-success)', fontWeight: '600', padding: '0.25rem 0.5rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '4px' }}>+{v.pointsDeducted}</span>
+                                                            ) : (
+                                                                <span style={{ color: 'var(--accent-danger)', fontWeight: '600', padding: '0.25rem 0.5rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px' }}>-{v.pointsDeducted}</span>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <span style={{ color: 'var(--accent-success)', fontWeight: '600', padding: '0.25rem 0.5rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '4px' }}>0</span>
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td style={{ padding: '1rem', textAlign: 'right' }}>
                                                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
@@ -818,6 +849,59 @@ const LogViolation = () => {
                             </tbody>
                         </table>
                     </div>
+
+                    {/* Pagination Controls */}
+                    {sortedViolations.length > ITEMS_PER_PAGE && (
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '1rem 1.5rem',
+                            borderTop: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-primary)'
+                        }}>
+                            <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                                Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, sortedViolations.length)} of {sortedViolations.length} records
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                <button
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        padding: '0.5rem',
+                                        borderRadius: 'var(--radius-md)',
+                                        border: '1px solid var(--border-color)',
+                                        backgroundColor: currentPage === 1 ? 'var(--bg-secondary)' : 'var(--bg-primary)',
+                                        color: currentPage === 1 ? 'var(--text-secondary)' : 'var(--text-primary)',
+                                        cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
+                                    }}
+                                >
+                                    <ChevronLeft size={20} />
+                                </button>
+                                <span style={{ padding: '0 0.5rem', fontWeight: '500', color: 'var(--text-primary)' }}>
+                                    Page {currentPage} of {totalPages}
+                                </span>
+                                <button
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        padding: '0.5rem',
+                                        borderRadius: 'var(--radius-md)',
+                                        border: '1px solid var(--border-color)',
+                                        backgroundColor: currentPage === totalPages ? 'var(--bg-secondary)' : 'var(--bg-primary)',
+                                        color: currentPage === totalPages ? 'var(--text-secondary)' : 'var(--text-primary)',
+                                        cursor: currentPage === totalPages ? 'not-allowed' : 'pointer'
+                                    }}
+                                >
+                                    <ChevronRight size={20} />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )
             }

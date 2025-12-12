@@ -5,6 +5,7 @@ import { deepSanitize } from '../utils/dataUtils';
 import { useAuth } from './AuthContext';
 import { useDB } from '../hooks/useDB';
 import { calculateNewProbationState } from '../services/daService';
+import LoadingScreen from '../components/LoadingScreen';
 
 const DataContext = createContext();
 
@@ -139,7 +140,7 @@ export function DataProvider({ children }) {
 const mapAllDocs = (doc) => {
     try {
         if (!doc) return 'unknown';
-        return doc.docType || 'unknown';
+        return String(doc.docType || 'unknown');
     } catch (e) {
         console.error('Error mapping doc:', e, doc);
         return 'error';
@@ -247,6 +248,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
     }, []);
 
     const processDocs = useCallback((docs) => {
+        lastUpdateRef.current = Date.now();
         const newState = deriveState(docs);
         setData(newState);
         // Do NOT set loading false here. It must go through checkCompletion.
@@ -256,6 +258,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
     const minTimePassedRef = useRef(false);
     const completionTriggeredRef = useRef(false);
     const dataReadyRef = useRef(false);
+    const lastUpdateRef = useRef(Date.now());
 
     // 1. Dynamic Loading Logic
     useEffect(() => {
@@ -314,11 +317,35 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             }, 320);
 
             // PHASE 3: Wait 8 seconds for data to fill (and sync), then dismiss loading screen
-            setTimeout(() => {
-                clearInterval(finishInterval);
-                setLoadingProgress(100);
-                setLoading(false);
-            }, 8000);
+            // PHASE 3: Wait for data to fill (and sync), then dismiss loading screen
+            // Replaced fixed timeout with stabilization check
+            const minWaitTime = 6000; // Minimum animation time
+            const stabilityThreshold = 2500; // Data must be unchanged for 2.5s
+            const sequenceStartTime = Date.now();
+
+            const checkStability = () => {
+                const now = Date.now();
+                const totalElapsed = now - sequenceStartTime;
+                const timeSinceLastUpdate = now - lastUpdateRef.current;
+
+                // Allow finish if:
+                // 1. Minimum animation time has passed
+                // 2. Data hasn't changed for 2.5 seconds (Stabilized)
+                if (totalElapsed >= minWaitTime && timeSinceLastUpdate >= stabilityThreshold) {
+                    clearInterval(finishInterval);
+                    setLoadingProgress(100);
+                    // Small delay to show 100%
+                    setTimeout(() => {
+                        setLoading(false);
+                    }, 200);
+                } else {
+                    // Keep checking
+                    setTimeout(checkStability, 500);
+                }
+            };
+
+            // Start checking
+            setTimeout(checkStability, 1000);
         }
     };
 
@@ -442,8 +469,10 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
             }));
 
 
+
             const res = await safePut(newEmployee);
             // console.log('Employee added successfully, result:', res);
+            return res; // Antigravity: Return result for ID tracking
         } catch (error) {
             console.error('Failed to add employee:', error);
             alert('Failed to add employee. See console for details.');
@@ -741,6 +770,34 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         }
     };
 
+    const clearAllData = async () => {
+        // Optimistic Update
+        setData(prev => ({
+            ...prev,
+            employees: [],
+            violations: [],
+            issuedDAs: []
+        }));
+
+        // Delete all employees
+        const employees = allDocs.docs.filter(d => d.docType === 'employee');
+        for (const doc of employees) {
+            await db.del(doc._id);
+        }
+
+        // Delete all violations
+        const violations = allDocs.docs.filter(d => d.docType === 'violation');
+        for (const doc of violations) {
+            await db.del(doc._id);
+        }
+
+        // Delete all issued DAs
+        const das = allDocs.docs.filter(d => d.docType === 'issuedDA');
+        for (const doc of das) {
+            await db.del(doc._id);
+        }
+    };
+
     const logReportUsage = async (reportId) => {
         const now = new Date().toISOString();
         const currentUsage = data.settings.reportUsage || {};
@@ -965,6 +1022,7 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
         exportDatabase,
         importDatabase,
         purgeOrphanedViolations,
+        clearAllData,
 
         issueDA,
         updateSettings,
@@ -978,44 +1036,10 @@ function DataProviderContent({ db, useLiveQuery, connected, organizationId, isOf
     return (
         <DataContext.Provider value={value}>
             {loading && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    width: '100vw',
-                    height: '100vh',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    backgroundColor: '#000000', // Black background
-                    color: '#f3f4f6', // Light text
-                    fontFamily: 'system-ui, -apple-system, sans-serif',
-                    flexDirection: 'column',
-                    zIndex: 9999 // Ensure it sits on top
-                }}>
-                    <div style={{ textAlign: 'center', width: '300px' }}>
-                        <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>{loadingMessage}</h2>
-
-                        {/* Progress Bar Container */}
-                        <div style={{
-                            width: '100%',
-                            height: '10px',
-                            backgroundColor: '#374151', // Darker gray container
-                            borderRadius: '5px',
-                            overflow: 'hidden',
-                            marginBottom: '0.5rem'
-                        }}>
-                            {/* Progress Bar Fill */}
-                            <div style={{
-                                width: `${loadingProgress}%`,
-                                height: '100%',
-                                backgroundColor: '#ef4444', // Red fill
-                                transition: 'width 0.3s ease-in-out'
-                            }}></div>
-                        </div>
-                        <div style={{ fontSize: '0.875rem', color: '#9ca3af' }}>{loadingProgress}%</div>
-                    </div>
-                </div>
+                <LoadingScreen
+                    message={loadingMessage}
+                    progress={loadingProgress}
+                />
             )}
             {appMounted && children}
         </DataContext.Provider>

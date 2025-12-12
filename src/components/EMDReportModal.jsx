@@ -60,7 +60,7 @@ const EMDReportModal = ({ isOpen, onClose }) => {
 
             // --- 1. Header & Styling Setup ---
             const companyName = data?.settings?.companyName || "Company Name";
-            const reportTitle = "Employee Meal Dollars (EMD) Report";
+            const reportTitle = "Meal Privilege Report";
             const periodText = `${new Date(selectedYear, selectedMonth).toLocaleString('default', { month: 'long' })} ${selectedYear}`;
             const generatedDate = new Date().toLocaleString();
 

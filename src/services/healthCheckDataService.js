@@ -396,7 +396,17 @@ const generateDraftSummary = ({ tierName, tierLevel, highestDA, nextTierDown, da
     // 4. Next Tier Name (Target of drop)
     // If currently Tier 2, dropping goes to Tier 3.
     const nextTierNum = tierNumber + 1;
-    const nextTierDisplay = `Tier ${nextTierNum}`;
+    let nextTierDisplay = `Tier ${nextTierNum}`;
+
+    // FIX: Handle Final Tier (Tier 5) or Final DA Status
+    // If we are already at Tier 5 OR have a Final DA, the next step is Termination.
+    const isFinalTier = tierLevel === 1; // Level 1 = Final / Tier 5
+    const isFinalDA = highestDA && highestDA.includes('Final');
+
+    if (isFinalTier || isFinalDA) {
+        nextTierDisplay = "Termination";
+        nextConsequence = "Termination";
+    }
 
     // 5. Days to Promotion
     let promotionPhrase = `You have ${daysToPromote} days left till you enter ${tierLevel === 4 ? 'Tier 1' : 'the next tier'}`;
@@ -409,5 +419,13 @@ const generateDraftSummary = ({ tierName, tierLevel, highestDA, nextTierDown, da
         return `You are currently in Tier 1 (Good Standing). You have no active Disciplinary Actions and are fully compliant with the attendance policy. If you drop to Tier 2, you will receive an Educational Stage DA. Please maintain your excellent attendance to keep your full meal benefits.`;
     }
 
-    return `You are currently in ${displayTier}, ${daPhrase} due to the drops between tiers due to lack of good attendance. If you drop tiers again from your current tier which is ${displayTier} to ${nextTierDisplay} you will receive ${nextConsequence}. ${promotionPhrase}. Please maintain good attendance to get those DA's dropped and get your full meal benefit back. [DB: ${highestDA} idx:${currentDaIndex}]`;
+    // REF: "Please maintain good attendance to get back to tier 1 and get those DA's dropped and get your full meal benefit back."
+    const closingSentence = "Please maintain good attendance to get back to tier 1 and get those DA's dropped and get your full meal benefit back.";
+
+    if (isFinalTier || isFinalDA) {
+        // Specific grammar for Final cases: "If you drop tiers again from your current tier which is [Current Tier], you will be terminated."
+        return `You are currently in ${displayTier}, ${daPhrase} due to the drops between tiers due to lack of good attendance. If you drop tiers again from your current tier which is ${displayTier}, you will be terminated. ${promotionPhrase}. ${closingSentence}`;
+    }
+
+    return `You are currently in ${displayTier}, ${daPhrase} due to the drops between tiers due to lack of good attendance. If you drop tiers again from your current tier which is ${displayTier} to ${nextTierDisplay} you will receive ${nextConsequence}. ${promotionPhrase}. ${closingSentence}`;
 };

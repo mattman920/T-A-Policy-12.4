@@ -7,7 +7,7 @@ import Modal from '../components/Modal';
 import ModernDatePicker from '../components/ModernDatePicker';
 
 const Settings = () => {
-    const { data, updateSettings, exportDatabase, importDatabase, reload, purgeOrphanedViolations } = useData();
+    const { data, updateSettings, exportDatabase, importDatabase, reload, purgeOrphanedViolations, addEmployee, addViolation, clearAllData } = useData();
     const { isDark, toggleTheme } = useTheme();
     const [importStatus, setImportStatus] = useState('');
     const [newReason, setNewReason] = useState('');
@@ -16,6 +16,9 @@ const Settings = () => {
     const [errorMessage, setErrorMessage] = useState('');
     const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
     const [restoreDate, setRestoreDate] = useState('');
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [genProgress, setGenProgress] = useState(0);
+    const [genStatus, setGenStatus] = useState('');
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
 
@@ -399,7 +402,7 @@ const Settings = () => {
                         </label>
                         <input
                             type="number"
-                            defaultValue={data.settings?.standardCalloutDeduction || 24}
+                            defaultValue={data.settings?.standardCalloutDeduction || 16}
                             onBlur={(e) => updateSettings({ standardCalloutDeduction: parseInt(e.target.value) })}
                             style={{
                                 width: '100%',
@@ -418,7 +421,7 @@ const Settings = () => {
                         </label>
                         <input
                             type="number"
-                            defaultValue={data.settings?.surgeDeductionPoints || 40}
+                            defaultValue={data.settings?.surgeDeductionPoints || 25}
                             onBlur={(e) => updateSettings({ surgeDeductionPoints: parseInt(e.target.value) })}
                             style={{
                                 width: '100%',
@@ -546,30 +549,125 @@ const Settings = () => {
             {/* Diagnostics Section */}
             <section style={sectionStyle}>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <AlertCircle size={20} /> System Diagnostics
+                    <AlertCircle size={20} /> System Diagnostics & Testing
                 </h2>
-                <button
-                    onClick={() => import('../utils/testLogic').then(module => module.runTestsAndDownloadReport())}
-                    style={navButtonStyle}
-                    onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                    onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-                >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <div style={{
-                            padding: '0.75rem',
-                            backgroundColor: 'var(--bg-secondary)',
-                            borderRadius: '50%',
-                            color: '#8b5cf6'
-                        }}>
-                            <Download size={24} />
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+                    <button
+                        onClick={() => import('../utils/testLogic').then(module => module.runTestsAndDownloadReport())}
+                        style={navButtonStyle}
+                        onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                        onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <div style={{
+                                padding: '0.75rem',
+                                backgroundColor: 'var(--bg-secondary)',
+                                borderRadius: '50%',
+                                color: '#8b5cf6'
+                            }}>
+                                <Download size={24} />
+                            </div>
+                            <div>
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Test Logic & Generate Report</h3>
+                                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Run comprehensive logic tests and download detailed PDF report</p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Test Logic & Generate Report</h3>
-                            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Run comprehensive logic tests and download detailed PDF report</p>
+                        <ChevronRight size={20} color="var(--text-secondary)" />
+                    </button>
+
+                    <button
+                        onClick={async () => {
+                            if (confirm("Start Test Data Generation?\n\nAdds 15 employees and ~65 events (50 violations, 15 positive).")) {
+                                setIsGenerating(true);
+                                setGenProgress(0);
+                                setGenStatus('Starting...');
+                                try {
+                                    const { runLoadTest } = await import('../utils/loadTest');
+                                    await runLoadTest(addEmployee, addViolation, (progress, msg) => {
+                                        setGenProgress(progress);
+                                        setGenStatus(msg);
+                                    });
+                                    // Small delay to show 100%
+                                    setTimeout(() => {
+                                        setIsGenerating(false);
+                                        alert("Test Data Generation Complete.");
+                                    }, 500);
+                                } catch (e) {
+                                    console.error(e);
+                                    alert("Error running test: " + e.message);
+                                    setIsGenerating(false);
+                                }
+                            }
+                        }}
+                        style={navButtonStyle}
+                        onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                        onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <div style={{
+                                padding: '0.75rem',
+                                backgroundColor: 'var(--bg-secondary)',
+                                borderRadius: '50%',
+                                color: '#3b82f6'
+                            }}>
+                                <Database size={24} />
+                            </div>
+                            <div>
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Generate Test Data</h3>
+                                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Populate system with 15 employees and 50 violations</p>
+                            </div>
                         </div>
-                    </div>
-                    <ChevronRight size={20} color="var(--text-secondary)" />
-                </button>
+                        <ChevronRight size={20} color="var(--text-secondary)" />
+                    </button>
+
+                    <button
+                        onClick={async () => {
+                            if (confirm("WARNING: DELETE ALL DATA?\n\nThis will remove ALL employees, violations, and issued DAs. This cannot be undone.")) {
+                                if (confirm("Are you absolutely sure?")) {
+                                    try {
+                                        await clearAllData();
+                                        alert("All data cleared.");
+                                        reload();
+                                    } catch (e) {
+                                        console.error(e);
+                                        alert("Error clearing data: " + e.message);
+                                    }
+                                }
+                            }
+                        }}
+                        style={{
+                            ...navButtonStyle,
+                            borderColor: 'var(--accent-danger)',
+                            backgroundColor: 'rgba(185, 28, 28, 0.05)'
+                        }}
+                        onMouseOver={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.backgroundColor = 'rgba(185, 28, 28, 0.1)';
+                        }}
+                        onMouseOut={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.backgroundColor = 'rgba(185, 28, 28, 0.05)';
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <div style={{
+                                padding: '0.75rem',
+                                backgroundColor: 'var(--bg-secondary)',
+                                borderRadius: '50%',
+                                color: 'var(--accent-danger)'
+                            }}>
+                                <Trash2 size={24} />
+                            </div>
+                            <div>
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: '600', color: 'var(--accent-danger)', marginBottom: '0.25rem' }}>Clear All Data</h3>
+                                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Permanently delete all employees and violations</p>
+                            </div>
+                        </div>
+                        <ChevronRight size={20} color="var(--text-secondary)" />
+                    </button>
+
+                </div>
             </section>
 
             {/* Data Management Section */}
@@ -847,6 +945,55 @@ const Settings = () => {
                     </div>
                 </div>
             </Modal>
+
+            {/* Progress Modal */}
+            {isGenerating && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.7)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999
+                }}>
+                    <div style={{
+                        backgroundColor: 'var(--bg-secondary)',
+                        padding: '2rem',
+                        borderRadius: 'var(--radius-lg)',
+                        width: '90%',
+                        maxWidth: '500px',
+                        textAlign: 'center',
+                        boxShadow: 'var(--shadow-lg)',
+                        border: '1px solid var(--border-color)'
+                    }}>
+                        <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1.5rem', color: 'var(--text-primary)' }}>Generating Test Data...</h3>
+
+                        <div style={{
+                            width: '100%',
+                            height: '24px',
+                            backgroundColor: 'var(--bg-primary)',
+                            borderRadius: '12px',
+                            overflow: 'hidden',
+                            marginBottom: '1rem',
+                            border: '1px solid var(--border-color)'
+                        }}>
+                            <div style={{
+                                width: `${genProgress}%`,
+                                height: '100%',
+                                backgroundColor: 'var(--accent-primary)',
+                                transition: 'width 0.3s ease'
+                            }} />
+                        </div>
+
+                        <p style={{ fontWeight: '500', color: 'var(--text-primary)', fontSize: '1.1rem' }}>{genProgress}%</p>
+                        <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>{genStatus}</p>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

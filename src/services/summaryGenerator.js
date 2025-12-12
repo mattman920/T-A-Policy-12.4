@@ -99,11 +99,22 @@ export const generateSummary = ({ employeeStatus, forecast, cycleData }) => {
     }
 
     // Construct the sentence
-    if (tierNum === 1) {
+    const closingSentence = `Please maintain good attendance to get back to tier 1 and get those DA's dropped and get your full meal benefit back.${freezeWarning}`;
+
+    // FIX: Handle Final Tier (Tier 5) or Final DA Status
+    const isFinalTier = tierNum >= 5; // Level 1 (Tier 5) or lower
+    const isFinalDA = activeStickyDA && (activeStickyDA.includes('Final') || activeStickyDA.includes('Termination'));
+
+    if (tierNum === 1 && !isFinalDA) {
         // Good Standing Template
         return `You are currently in Tier 1 (Good Standing). You have no active Disciplinary Actions. If you drop to Tier 2, you will receive an Educational Stage DA. Please maintain your attendance to keep your full meal benefits.${freezeWarning}`;
-    } else {
-        // Active DA Template
-        return `You are currently in ${displayTier}, ${daPhrase} due to the drops between tiers due to lack of good attendance. If you drop tiers again from your current tier which is ${displayTier} to ${nextTierDisplay} you will receive ${nextConsequence}. ${promotionPhrase} Please maintain good attendance to get those DA's dropped and get your full meal benefit back.${freezeWarning}`;
     }
+
+    if (isFinalTier || isFinalDA) {
+        // Specific grammar for Final cases:
+        return `You are currently in ${displayTier}, ${daPhrase} due to the drops between tiers due to lack of good attendance. If you drop tiers again from your current tier which is ${displayTier}, you will be terminated. ${promotionPhrase} ${closingSentence}`;
+    }
+
+    // Standard Template
+    return `You are currently in ${displayTier}, ${daPhrase} due to the drops between tiers due to lack of good attendance. If you drop tiers again from your current tier which is ${displayTier} to ${nextTierDisplay} you will receive ${nextConsequence}. ${promotionPhrase} ${closingSentence}`;
 };

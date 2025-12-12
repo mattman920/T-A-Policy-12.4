@@ -81,6 +81,8 @@ const Dashboard = () => {
       const required = getRequiredDAs(emp, allViolations, data.settings, issuedDAs);
 
       required.forEach(da => {
+        if (da.status === 'issued') return; // FIX: Skip issued DAs
+
         if (da.tier === TIERS.EDUCATIONAL.name) educational++;
         else if (da.tier === TIERS.COACHING.name) coaching++;
         else if (da.tier === TIERS.SEVERE.name) severe++;

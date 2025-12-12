@@ -873,7 +873,7 @@ const ReportsGenerator = () => {
                         }}
                     >
                         <FileSpreadsheet size={20} />
-                        Generate EMD Report
+                        Generate Meal Report
                     </button>
 
                     <button
